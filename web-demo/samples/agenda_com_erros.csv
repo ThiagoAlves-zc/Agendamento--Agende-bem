@@ -1,0 +1,8 @@
+data;horario;duracao_min;profissional;especialidade;paciente;status
+2026-10-23;08:00;30;Dra. Helena Prado;Clínica Geral;Ana Beatriz Souza;confirmado
+2026-10-23;08:15;30;Dra. Helena Prado;Clínica Geral;Carlos Eduardo Lima;confirmado
+2026-10-23;25:00;30;Dr. Rafael Mendes;Cardiologia;Roberto Nunes;confirmado
+2026-10-23;09:00;7;Dr. Rafael Mendes;Cardiologia;Sílvia Castro;confirmado
+2026-10-23;09:30;30;Dr. Rafael Mendes;Cardiologia;=HYPERLINK("http://exemplo.invalido");confirmado
+2026-10-23;10:00;30;Dra. Lívia Tanaka;Dermatologia;Bruna Teixeira;pendente
+2026-10-24;10:30;30;Dr. Paulo Lins;Ortopedia;Gustavo Reis;confirmado
