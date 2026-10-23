@@ -1,0 +1,23 @@
+data;horario;duracao_min;profissional;especialidade;paciente;status
+2026-10-23;08:00;30;Dra. Helena Prado;Clínica Geral;Ana Beatriz Souza;confirmado
+2026-10-23;08:30;30;Dra. Helena Prado;Clínica Geral;Carlos Eduardo Lima;confirmado
+2026-10-23;09:00;30;Dra. Helena Prado;Clínica Geral;Fernanda Rocha;confirmado
+2026-10-23;09:30;30;Dra. Helena Prado;Clínica Geral;Marcos Vieira;confirmado
+2026-10-23;10:00;45;Dra. Helena Prado;Clínica Geral;Patrícia Gomes;confirmado
+2026-10-23;10:45;20;Dra. Helena Prado;Clínica Geral;João Pedro Alves;confirmado
+2026-10-23;11:05;30;Dra. Helena Prado;Clínica Geral;Luana Martins;confirmado
+2026-10-23;11:35;20;Dra. Helena Prado;Clínica Geral;Heitor Campos;confirmado
+2026-10-23;08:00;45;Dr. Rafael Mendes;Cardiologia;Roberto Nunes;confirmado
+2026-10-23;08:45;45;Dr. Rafael Mendes;Cardiologia;Sílvia Castro;confirmado
+2026-10-23;09:30;30;Dr. Rafael Mendes;Cardiologia;Thiago Barros;confirmado
+2026-10-23;10:00;20;Dr. Rafael Mendes;Cardiologia;Vanessa Ribeiro;confirmado
+2026-10-23;10:20;45;Dr. Rafael Mendes;Cardiologia;Eduardo Farias;confirmado
+2026-10-23;11:05;30;Dr. Rafael Mendes;Cardiologia;Beatriz Lacerda;confirmado
+2026-10-23;08:00;20;Dra. Lívia Tanaka;Dermatologia;Bruna Teixeira;confirmado
+2026-10-23;08:20;20;Dra. Lívia Tanaka;Dermatologia;Gustavo Reis;confirmado
+2026-10-23;08:40;30;Dra. Lívia Tanaka;Dermatologia;Isabela Duarte;confirmado
+2026-10-23;09:10;30;Dra. Lívia Tanaka;Dermatologia;Sofia Martins;cancelado
+2026-10-23;09:40;45;Dra. Lívia Tanaka;Dermatologia;Leonardo Pires;confirmado
+2026-10-23;10:25;20;Dra. Lívia Tanaka;Dermatologia;Mariana Costa;confirmado
+2026-10-23;10:45;30;Dra. Lívia Tanaka;Dermatologia;Otávio Santana;confirmado
+2026-10-23;11:15;45;Dra. Lívia Tanaka;Dermatologia;Renata Alencar;confirmado

@@ -1,0 +1,21 @@
+[server]
+# Somente acesso local: a aplicação não deve ser exposta na rede.
+address = "localhost"
+port = 8501
+headless = true
+maxUploadSize = 1
+
+[browser]
+gatherUsageStats = false
+serverAddress = "localhost"
+
+[theme]
+base = "light"
+primaryColor = "#12355B"
+backgroundColor = "#F5F7FA"
+secondaryBackgroundColor = "#EAF0F6"
+textColor = "#1B2433"
+font = "sans serif"
+
+[client]
+toolbarMode = "minimal"
