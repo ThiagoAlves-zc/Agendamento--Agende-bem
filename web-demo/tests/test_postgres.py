@@ -131,6 +131,26 @@ def test_supabase_api_roles_cannot_read_private_schema(pg_urls):
         assert rls is True
 
 
+def test_v3_foundation_keeps_new_entities_private_and_constrained(pg, pg_urls):
+    """Pacientes e metadados de arquivos ficam no schema privado, sem API pública."""
+    pg.execute("INSERT INTO patients (display_name) VALUES (?)", ("Paciente de teste",))
+    with pytest.raises(IntegrityError):
+        pg.execute("INSERT INTO patients (display_name) VALUES (?)", ("paciente de teste",))
+
+    with admin(pg_urls) as conn:
+        for role in ("anon", "authenticated"):
+            for table in ("patients", "file_assets", "file_templates", "file_template_versions"):
+                allowed = conn.execute(
+                    "SELECT has_table_privilege(%s, %s, 'SELECT')", (role, f"agende_bem.{table}")
+                ).fetchone()[0]
+                assert allowed is False, (role, table)
+        policies = conn.execute(
+            "SELECT count(*) FROM pg_policies WHERE schemaname = 'agende_bem' "
+            "AND tablename IN ('patients', 'file_assets', 'file_templates', 'file_template_versions')"
+        ).fetchone()[0]
+        assert policies == 4
+
+
 def test_reset_only_touches_private_schema(pg, pg_urls):
     cancel_marcos(pg)
     reset_demo(pg, DEMO_DAY)

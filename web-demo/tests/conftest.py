@@ -66,7 +66,8 @@ def pg_urls():
                 admin.execute(f"CREATE ROLE {role} NOLOGIN")
 
     admin_url = _with_db(PG_ADMIN_URL, PG_TEST_DB)
-    assert migrate.migrate(admin_url) == ["0001_schema", "0002_app_role", "0003_reset_function"]
+    expected_migrations = [path.stem for path in database.migration_files("postgres")]
+    assert migrate.migrate(admin_url) == expected_migrations
 
     password = secrets.token_urlsafe(24)
     with psycopg.connect(admin_url, autocommit=True) as admin:
