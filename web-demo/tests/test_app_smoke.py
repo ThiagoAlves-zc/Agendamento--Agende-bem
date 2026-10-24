@@ -4,13 +4,22 @@ from pathlib import Path
 import pytest
 from streamlit.testing.v1 import AppTest
 
+from conftest import DEMO_DAY
+from database import connect
+from seed import reset_demo
+
 APP = str(Path(__file__).resolve().parents[1] / "app.py")
-PAGES = ["Dashboard", "Agenda", "Lista de espera", "Sugestões", "Importar / Exportar"]
+PAGES = ["Dashboard", "Agenda", "Lista de espera", "Sugestões", "Aproveitamento", "Histórico", "Arquivos", "Modelos", "Usuários e permissões", "Perfil", "Apresentação", "Importar / Exportar"]
 
 
 @pytest.fixture
-def app(tmp_path, monkeypatch):
-    monkeypatch.setenv("AGENDE_BEM_DB", str(tmp_path / "ui.db"))
+def app(tmp_path, monkeypatch, backend, request):
+    if backend == "sqlite":
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        monkeypatch.setenv("AGENDE_BEM_DB", str(tmp_path / "ui.db"))
+    else:
+        monkeypatch.setenv("DATABASE_URL", request.getfixturevalue("pg_urls")[1])
+        reset_demo(connect(), DEMO_DAY)
     at = AppTest.from_file(APP, default_timeout=30)
     at.run()
     assert not at.exception
@@ -19,12 +28,26 @@ def app(tmp_path, monkeypatch):
 
 def test_all_pages_render(app):
     for page in PAGES:
-        app.radio(key="page").set_value(page).run()
+        slug = {
+            "Dashboard": "dashboard",
+            "Agenda": "agenda",
+            "Lista de espera": "espera",
+            "Sugestões": "sugestoes",
+            "Aproveitamento": "aproveitamento",
+            "Histórico": "historico",
+            "Arquivos": "arquivos",
+            "Modelos": "modelos",
+            "Usuários e permissões": "usuarios",
+            "Perfil": "perfil",
+            "Apresentação": "apresentacao",
+            "Importar / Exportar": "dados",
+        }[page]
+        app.button(key=f"nav_{slug}").click().run()
         assert not app.exception, page
 
 
 def test_cancel_suggest_confirm_flow(app):
-    app.radio(key="page").set_value("Agenda").run()
+    app.button(key="nav_agenda").click().run()
     cancel = next(b for b in app.button if b.label == "Cancelar" and b.key == "cancel_4")  # Marcos Vieira
     cancel.click().run()
     app.button(key="confirm_4").click().run()
@@ -38,3 +61,13 @@ def test_cancel_suggest_confirm_flow(app):
     assert not app.exception
     assert app.session_state["page"] == "Agenda"
     assert any("Paula Andrade" in s.value for s in app.success)
+
+
+def test_import_by_pasted_csv(app):
+    sample = (Path(APP).parent / "samples" / "agenda_exemplo.csv").read_text(encoding="utf-8")
+    app.button(key="nav_dados").click().run()
+    app.text_area(key="pasted_0").set_value(sample).run()
+    assert not app.error
+    next(b for b in app.button if b.label == "Importar agenda").click().run()
+    assert not app.exception
+    assert any("22 consultas" in s.value for s in app.success)

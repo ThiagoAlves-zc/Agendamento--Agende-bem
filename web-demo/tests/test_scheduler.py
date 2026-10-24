@@ -79,3 +79,19 @@ def test_window_must_be_on_agenda_day():
     evals = evaluate_candidates(WINDOW, AGENDA, [entry(1)], DAY + timedelta(days=1))
     assert not evals[0].eligible
     assert "dia de atendimento" in evals[0].reasons[0]
+
+
+def test_today_local_uses_clinic_timezone(monkeypatch):
+    """O servidor roda em UTC; a data da agenda deve seguir America/Sao_Paulo."""
+    from datetime import datetime, timezone
+
+    import models
+
+    class FakeDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            utc = datetime(2026, 10, 24, 1, 30, tzinfo=timezone.utc)  # 22:30 do dia 23 em Brasília
+            return utc.astimezone(tz) if tz else utc
+
+    monkeypatch.setattr(models, "datetime", FakeDatetime)
+    assert models.today_local() == date(2026, 10, 23)

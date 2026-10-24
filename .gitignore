@@ -1,0 +1,16 @@
+# Arquivos locais e credenciais: nunca versionar no nível raiz.
+.env
+.env.*
+!.env.example
+
+# Ambientes, caches e artefatos de teste.
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.log
+
+# Dados locais e artefatos de deployment.
+*.db
+*.db-journal
+.vercel/

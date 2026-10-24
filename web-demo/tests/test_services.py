@@ -1,7 +1,7 @@
 import pytest
 
 import services
-from database import connect
+import database
 from models import ValidationError, parse_time
 
 
@@ -15,6 +15,24 @@ def test_seed_scenario(conn):
     assert stats.total == 19 and stats.cancelled == 0
     assert stats.waiting == 7
     assert {a.duration for a in services.list_appointments(conn)} == {20, 30, 45}
+
+
+def test_utilization_and_history_are_derived_from_persisted_data(conn):
+    initial = services.utilization_summary(conn)
+    assert initial.open_windows == 3
+    assert initial.fit_in_count == 0
+    assert initial.recovered_minutes == 0
+    assert 0 < initial.occupancy_rate <= 1
+
+    window = services.cancel_appointment(conn, find(conn, "Marcos Vieira").id)
+    best = services.evaluate_window(conn, window)[0]
+    services.confirm_fit_in(conn, best.entry.id, window.professional_id, best.start)
+
+    summary = services.utilization_summary(conn)
+    assert summary.fit_in_count == 1
+    assert summary.recovered_minutes == best.entry.duration
+    history = services.activity_history(conn)
+    assert history[0]["event_type"] == "encaixe_confirmado"
 
 
 def test_cancel_preserves_record_and_suggests(conn):
@@ -100,9 +118,11 @@ def test_waiting_validations(conn):
     assert any(e.id == new_id for e in services.list_waiting(conn, "ativo"))
 
 
-def test_data_persists_across_connections(conn, db_file):
+def test_data_persists_across_connections(conn, open_db, backend):
     services.cancel_appointment(conn, find(conn, "Marcos Vieira").id)
     conn.close()
-    reopened = connect(db_file)
+    if backend == "postgres":
+        database.close_pools()  # simula reinício da instância: nenhum estado em memória
+    reopened = open_db()
     assert find(reopened, "Marcos Vieira").status == "cancelado"
     reopened.close()

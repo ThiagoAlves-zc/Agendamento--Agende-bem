@@ -1,0 +1,17 @@
+# Nunca enviar à Vercel: segredos, bancos locais, ambiente virtual e temporários.
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite*
+__pycache__/
+*.pyc
+.pytest_cache/
+tests/
+*.log

@@ -8,7 +8,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
+LOCAL_TZ = ZoneInfo("America/Sao_Paulo")
 MAX_PROFESSIONALS = 3
 MIN_DURATION = 10
 MAX_DURATION = 240
@@ -67,6 +69,11 @@ def parse_date(value: str | date) -> date:
 
 def fmt_date_br(value: date) -> str:
     return value.strftime("%d/%m/%Y")
+
+
+def today_local() -> date:
+    """Data de hoje no fuso da clínica (o servidor pode rodar em UTC)."""
+    return datetime.now(LOCAL_TZ).date()
 
 
 # --------------------------------------------------------------- validações
