@@ -1,7 +1,7 @@
 # Deploy privado — Vercel + Supabase
 
-Status: **preparado, não implantado.** Nada foi enviado à Vercel nem ao Supabase.
-Pré-requisitos ainda pendentes estão em [Pendências](#pendências).
+Status: **implantado em ambiente pessoal protegido** (Vercel Hobby + Supabase Free, São Paulo).
+Resultados medidos em [Resultado da implantação](#resultado-da-implantação).
 
 ## Arquitetura
 
@@ -43,7 +43,7 @@ Navegador ──HTTPS/WSS──▶ Vercel (Deployment Protection: Vercel Authent
 5. Monte a `DATABASE_URL` com o **Transaction pooler** (porta 6543), usuário com sufixo do projeto:
 
    ```
-   postgresql://agende_bem_app.<REF>:<senha>@aws-0-sa-east-1.pooler.supabase.com:6543/postgres?sslmode=require
+   postgresql://agende_bem_app.<REF>:<senha>@aws-<N>-sa-east-1.pooler.supabase.com:6543/postgres?sslmode=require
    ```
 
    O host exato aparece em *Connect → Transaction pooler*. `sslmode` abaixo de `require`
@@ -113,7 +113,28 @@ mantendo o Supabase.
 
 1. **Repositório privado**: `ThiagoAlves-zc/Agendamento--Agende-bem` é **público**. Criar
    um repositório privado (ou tornar este privado) antes de enviar esta branch.
-2. **Projeto Supabase novo**: informar o *project ref* e a região para aplicar as migrations.
-3. **Acesso à Vercel**: time/plano e confirmação de Vercel Authentication em All Deployments.
-4. **Build da imagem**: Docker não está instalado nesta máquina; o `Dockerfile.vercel` não
-   foi construído localmente (o primeiro build ocorrerá na Vercel).
+2. ~~Projeto Supabase novo~~ — criado e migrado.
+3. ~~Acesso à Vercel~~ — projeto pessoal criado com Vercel Authentication em All Deployments.
+4. **Build da imagem**: Docker não está instalado na máquina de desenvolvimento; a imagem é
+   construída remotamente pela Vercel (buildah).
+
+## Resultado da implantação
+
+Medições no deploy real (container em Vercel Functions, região gru1, Supabase sa-east-1):
+
+| Item | Resultado |
+|---|---|
+| Detecção do container | Exige `services` + `runtime: "container"` no `vercel.json`; sem isso a Vercel publica os arquivos como site estático |
+| Build | buildah, 11 etapas, ~1 min; `HEALTHCHECK` não é suportado em imagens OCI (removido) |
+| Porta | A Vercel injeta `PORT=80`; o `CMD` usa `${PORT}` |
+| Proteção | Vercel Authentication em All Deployments: página, WebSocket e arquivos retornam 302 para o login |
+| Banco | Pooler em modo transação (6543) com `prepare_threshold=None`; TLS confirmado no cliente |
+| Fluxo completo | Importação (upload e colagem), lista de espera, cancelamento, sugestões, confirmação, exportação e persistência OK |
+| WebSocket | Cai com código 1006 a cada ~90–110 s e o Streamlit reconecta sozinho; após algumas reconexões a primeira interação se perde e precisa ser repetida |
+| Instâncias | Cada carga de página dispara dezenas de instâncias (45–75 inícios por sessão de teste de um usuário); sem erros, mas com cold starts e consumo de cota |
+| Fuso horário | O container roda em UTC; a data da agenda usa `America/Sao_Paulo` (corrigido) |
+
+**Conclusão:** funciona para demonstração interna, mas o modelo da Vercel (funções efêmeras sem
+afinidade) não é adequado ao processo persistente do Streamlit. Para uso contínuo, recomenda-se
+o mesmo container em Cloud Run (`southamerica-east1`, afinidade de sessão) ou Fly.io (`gru`),
+mantendo o Supabase.
