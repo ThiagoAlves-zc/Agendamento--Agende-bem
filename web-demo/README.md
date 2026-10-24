@@ -126,3 +126,4 @@ tests/          pytest (motor, serviços, CSV e smoke test da UI)
 - [Arquitetura](docs/ARCHITECTURE.md): camadas, métricas operacionais e limitações de sessão.
 - [Guia de contribuição](CONTRIBUTING.md): ambiente local, qualidade e regras para alterações.
 - [Fundação V3](docs/V3_FOUNDATION.md): evolução segura de pacientes, arquivos e modelos sem aplicar recursos remotos.
+- [Auditoria V3](docs/V3_AUDIT.md): inventário, evidências responsivas, riscos e sequência segura de ativação.
