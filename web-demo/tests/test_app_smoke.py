@@ -9,7 +9,7 @@ from database import connect
 from seed import reset_demo
 
 APP = str(Path(__file__).resolve().parents[1] / "app.py")
-PAGES = ["Dashboard", "Agenda", "Lista de espera", "Sugestões", "Importar / Exportar"]
+PAGES = ["Dashboard", "Agenda", "Lista de espera", "Sugestões", "Aproveitamento", "Histórico", "Apresentação", "Importar / Exportar"]
 
 
 @pytest.fixture
@@ -33,6 +33,9 @@ def test_all_pages_render(app):
             "Agenda": "agenda",
             "Lista de espera": "espera",
             "Sugestões": "sugestoes",
+            "Aproveitamento": "aproveitamento",
+            "Histórico": "historico",
+            "Apresentação": "apresentacao",
             "Importar / Exportar": "dados",
         }[page]
         app.button(key=f"nav_{slug}").click().run()

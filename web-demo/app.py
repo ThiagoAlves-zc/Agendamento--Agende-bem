@@ -31,8 +31,8 @@ from seed import ensure_seeded, reset_demo
 BASE_DIR = Path(__file__).resolve().parent
 SAMPLE_CSV = BASE_DIR / "samples" / "agenda_exemplo.csv"
 
-PAGES = ["Dashboard", "Agenda", "Lista de espera", "Sugestões", "Importar / Exportar"]
-PAGE_SLUGS = dict(zip(PAGES, ["dashboard", "agenda", "espera", "sugestoes", "dados"]))
+PAGES = ["Dashboard", "Agenda", "Lista de espera", "Sugestões", "Aproveitamento", "Histórico", "Apresentação", "Importar / Exportar"]
+PAGE_SLUGS = dict(zip(PAGES, ["dashboard", "agenda", "espera", "sugestoes", "aproveitamento", "historico", "apresentacao", "dados"]))
 PAGE_SLUGS_REVERSE = {slug: page for page, slug in PAGE_SLUGS.items()}
 WEEKDAYS = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"]
 
@@ -208,7 +208,10 @@ def sidebar(conn) -> str:
             ("dashboard", "Dashboard", ":material/dashboard:"),
             ("agenda", "Agenda", ":material/calendar_month:"),
             ("espera", "Lista de Espera", ":material/group:"),
-            ("sugestoes", "Sugestões", ":material/auto_awesome:"),
+            ("sugestoes", "Central de encaixes", ":material/event_available:"),
+            ("aproveitamento", "Aproveitamento", ":material/insights:"),
+            ("historico", "Histórico", ":material/history:"),
+            ("apresentacao", "Modo de apresentação", ":material/slideshow:"),
             ("dados", "Importar / Exportar", ":material/import_export:"),
         ]
         for slug, label, icon in navigation:
@@ -235,8 +238,8 @@ def sidebar(conn) -> str:
 def page_dashboard(conn) -> None:
     stats = services.dashboard_stats(conn)
     profs = services.list_professionals(conn)
-    page_head("Visão geral", "Painel da recepção",
-              "Acompanhe ocupação, fila de espera e oportunidades de encaixe.", stats.day)
+    page_head("Central operacional", "Bom trabalho, recepção",
+              "Priorize os próximos atendimentos e resolva oportunidades de encaixe do dia.", stats.day)
 
     cards = [
         ("", "Atendimentos", stats.total, f"{len(profs)} profissionais", "●"),
@@ -299,6 +302,25 @@ def page_dashboard(conn) -> None:
         ) or '<div class="ab-slot-meta">Nenhuma atividade registrada.</div>'
         html(f'<div class="ab-panel"><div class="ab-panel-title">Atividade recente</div>{items}</div>')
 
+    appts = sorted((a for a in services.list_appointments(conn, stats.day) if a.is_active), key=lambda a: a.start)
+    names = services.professional_names(conn)
+    upcoming = appts[:4]
+    lower_left, lower_right = st.columns([1.45, 1], gap="medium")
+    with lower_left:
+        rows = "".join(
+            f'<div class="ab-next"><b>{fmt_time(a.start)}</b><span>{escape(a.patient_name)}</span>'
+            f'<small>{escape(names.get(a.professional_id, "—"))} · {a.duration} min</small></div>'
+            for a in upcoming
+        ) or '<div class="ab-slot-meta">Não há atendimentos confirmados neste dia.</div>'
+        html(f'<div class="ab-panel"><div class="ab-panel-title">Próximos atendimentos</div>{rows}</div>')
+    with lower_right:
+        with st.container(border=True):
+            st.markdown("**Ações rápidas**")
+            st.caption("Acesse os fluxos operacionais sem sair do contexto do dia.")
+            c1, c2 = st.columns(2)
+            c1.button("Abrir agenda", key="dash_agenda", on_click=go, args=("Agenda",), width="stretch")
+            c2.button("Ver encaixes", key="dash_fits", on_click=go, args=("Sugestões",), width="stretch", type="primary")
+
 
 # ------------------------------------------------------------------ agenda
 
@@ -334,6 +356,7 @@ def page_agenda(conn) -> None:
     appts = services.list_appointments(conn, day)
     page_head("Agenda do dia", "Agenda por profissional",
               "Visualize atendimentos, vagas e cancelamentos por profissional.", day)
+    st.caption("**Linha do tempo** · blocos proporcionais representam a duração. Use as abas para a lista detalhada e acessível.")
 
     if st.query_params.get("encaixe") == "confirmado":
         success = st.session_state.get("fit_success")
@@ -382,6 +405,19 @@ def page_agenda(conn) -> None:
                     if c4.button("Cancelar", key=f"cancel_{appt.id}", width="stretch"):
                         cancel_dialog(appt)
 
+    active = [a for a in appts if a.is_active]
+    if active:
+        detail_names = services.professional_names(conn)
+        detail = st.selectbox(
+            "Detalhes do atendimento",
+            active,
+            format_func=lambda a: f"{fmt_time(a.start)} · {a.patient_name} · {detail_names.get(a.professional_id, '—')}",
+            key="agenda_detail",
+        )
+        with st.container(border=True):
+            st.markdown(f"**{detail.patient_name}** · {fmt_time(detail.start)}–{fmt_time(detail.end)}")
+            st.caption(f"{detail.duration} min · {'Encaixe confirmado' if detail.origin == ORIGIN_FIT_IN else 'Atendimento confirmado'}")
+
 
 # --------------------------------------------------------- lista de espera
 
@@ -419,15 +455,21 @@ def page_waiting(conn) -> None:
                 st.rerun()
 
     with right:
-        search = st.text_input("Pesquisar paciente", key="waiting_search", placeholder="Nome, profissional ou situação")
-        only_active = st.segmented_control("Exibir", ["Ativos", "Todos"], default="Ativos",
+        f1, f2 = st.columns([1.5, 1])
+        search = f1.text_input("Pesquisar paciente", key="waiting_search", placeholder="Nome, profissional ou situação")
+        selected_prof = f2.selectbox("Profissional", [None] + list(names), format_func=lambda i: "Todos" if i is None else names[i], key="waiting_professional")
+        only_active = st.segmented_control("Situação", ["Ativos", "Todos"], default="Ativos",
                                            label_visibility="collapsed") != "Todos"
         entries = services.list_waiting(conn, WAIT_ACTIVE if only_active else None)
+        if selected_prof is not None:
+            entries = [e for e in entries if selected_prof in e.professional_ids]
         if search.strip():
             term = search.casefold().strip()
             entries = [e for e in entries if term in e.patient_name.casefold()
                        or term in e.status.casefold()
                        or any(term in names.get(prof_id, "").casefold() for prof_id in e.professional_ids)]
+        entries.sort(key=lambda e: (day - e.requested_on).days, reverse=True)
+        st.caption(f"{len([e for e in entries if e.status == WAIT_ACTIVE])} paciente(s) ativo(s) nesta visão · ordenado por tempo de espera.")
         if not entries:
             st.info("Nenhum paciente corresponde à pesquisa." if search.strip()
                     else "Nenhum paciente na lista de espera.")
@@ -463,8 +505,8 @@ def page_suggestions(conn) -> None:
     day = services.get_agenda_day(conn)
     names = services.professional_names(conn)
     appts = {a.id: a for a in services.list_appointments(conn, day)}
-    page_head("Sugestões inteligentes", "Encaixes para horários livres",
-              "O sistema sugere; a recepção decide. Nenhuma vaga é preenchida sem confirmação.", day)
+    page_head("Central de encaixes", "Oportunidades para horários livres",
+              "Candidatos são ordenados por regras determinísticas; a recepção confirma cada encaixe.", day)
 
     windows = services.available_windows(conn)
     if not windows:
@@ -515,6 +557,8 @@ def page_suggestions(conn) -> None:
                     f'<span class="ab-badge free">Espera: {ev.wait_days} dias</span>'
                     f'<span class="ab-badge free">Aproveitamento: {ev.occupancy:.0%}</span>{tag}</div>'
                     f'<ul class="ab-reasons">{reasons}</ul>'
+                    f'<div class="ab-candidate-meta">Duração necessária: {ev.entry.duration} min · '
+                    f'Disponível: {fmt_time(ev.entry.available_from)}–{fmt_time(ev.entry.available_until)}</div>'
                 )
             with c2:
                 if st.button("Selecionar", key=f"pick_{ev.entry.id}", width="stretch",
@@ -527,6 +571,82 @@ def page_suggestions(conn) -> None:
                 pd.DataFrame([{"Paciente": e.entry.patient_name, "Motivo": e.reasons[0]} for e in rejected]),
                 hide_index=True, width="stretch",
             )
+
+
+# ---------------------------------------------------- visões operacionais
+
+def page_utilization(conn) -> None:
+    day = services.get_agenda_day(conn)
+    summary = services.utilization_summary(conn)
+    page_head("Operação", "Visão de aproveitamento",
+              "Indicadores calculados exclusivamente a partir da agenda persistida.", day)
+    cards = [
+        ("Vagas abertas", summary.open_windows, f"{summary.open_minutes} min disponíveis"),
+        ("Encaixes confirmados", summary.fit_in_count, f"{summary.recovered_minutes} min recuperados"),
+        ("Taxa de ocupação", f"{summary.occupancy_rate:.0%}", "consultas ativas / capacidade"),
+    ]
+    html('<div class="ab-operation-metrics">' + ''.join(
+        f'<div class="ab-operation-card"><span>{escape(label)}</span><b>{value}</b><small>{escape(note)}</small></div>'
+        for label, value, note in cards
+    ) + '</div>')
+    with st.container(border=True):
+        st.markdown("**Como calculamos**")
+        st.markdown(
+            "- **Vagas abertas:** intervalos livres identificados dentro do expediente cadastrado.\n"
+            "- **Tempo recuperado:** soma das durações de atendimentos ativos com origem `encaixe`.\n"
+            "- **Taxa de ocupação:** minutos de consultas ativas ÷ minutos totais de expediente dos profissionais ativos."
+        )
+
+
+def page_history(conn) -> None:
+    day = services.get_agenda_day(conn)
+    page_head("Rastreabilidade", "Histórico de atividades",
+              "Registro das operações realizadas neste ambiente de demonstração.", day)
+    labels = {
+        "consulta_cancelada": "Consulta cancelada", "encaixe_confirmado": "Encaixe confirmado",
+        "espera_cadastrada": "Entrada na lista de espera", "espera_removida": "Saída da lista de espera",
+        "agenda_importada": "Agenda importada", "agenda_exportada": "Agenda exportada",
+        "dados_demo_restaurados": "Dados restaurados", "consulta_criada": "Consulta criada",
+        "profissional_cadastrado": "Profissional cadastrado",
+    }
+    events = services.activity_history(conn)
+    search = st.text_input("Pesquisar no histórico", placeholder="Operação ou descrição", key="history_search")
+    if search.strip():
+        term = search.casefold().strip()
+        events = [e for e in events if term in e["event_type"].casefold() or term in e["details"].casefold()]
+    table = pd.DataFrame([
+        {
+            "Data e hora": e["created_at"].replace("T", " ")[:16],
+            "Operação": labels.get(e["event_type"], e["event_type"].replace("_", " ").capitalize()),
+            "Descrição": e["details"] or "—",
+        }
+        for e in events
+    ])
+    if table.empty:
+        st.info("Nenhum evento corresponde à pesquisa.")
+    else:
+        st.dataframe(table, hide_index=True, width="stretch", height=480)
+
+
+def page_presentation(conn) -> None:
+    day = services.get_agenda_day(conn)
+    page_head("Demonstração", "Fluxo guiado de encaixe",
+              "Use dados sintéticos e confirme cada operação manualmente durante a apresentação.", day)
+    steps = [
+        ("1", "Abra a agenda", "Encontre um atendimento confirmado e selecione Cancelar."),
+        ("2", "Revise o cancelamento", "O modal preserva o histórico e requer confirmação explícita."),
+        ("3", "Analise candidatos", "A Central de encaixes explica elegibilidade e ordenação."),
+        ("4", "Confirme o encaixe", "A disponibilidade é revalidada transacionalmente antes de gravar."),
+        ("5", "Confira a agenda", "O novo atendimento aparece com origem de encaixe.")
+    ]
+    html('<div class="ab-demo-steps">' + ''.join(
+        f'<div class="ab-demo-step"><b>{n}</b><div><strong>{escape(title)}</strong><span>{escape(text)}</span></div></div>'
+        for n, title, text in steps
+    ) + '</div>')
+    c1, c2 = st.columns(2)
+    c1.button("Começar pela agenda", type="primary", width="stretch", on_click=go, args=("Agenda",))
+    c2.button("Abrir central de encaixes", width="stretch", on_click=go, args=("Sugestões",))
+    st.caption("Este modo não reinicializa dados nem executa cancelamentos ou encaixes automaticamente.")
 
 
 # ------------------------------------------------------- importar/exportar
@@ -638,6 +758,9 @@ def main() -> None:
         "Agenda": page_agenda,
         "Lista de espera": page_waiting,
         "Sugestões": page_suggestions,
+        "Aproveitamento": page_utilization,
+        "Histórico": page_history,
+        "Apresentação": page_presentation,
         "Importar / Exportar": page_import_export,
     }[page](conn)
 

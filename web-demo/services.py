@@ -103,6 +103,11 @@ def recent_events(conn: Database, limit: int = 8) -> list[dict]:
     return events
 
 
+def activity_history(conn: Database, limit: int = 100) -> list[dict]:
+    """Histórico somente leitura para a central operacional."""
+    return recent_events(conn, limit=min(max(int(limit), 1), 200))
+
+
 def find_overlaps(appointments: Iterable[Appointment]) -> list[str]:
     """Mensagens para consultas ativas sobrepostas (mesmo profissional ou mesmo paciente)."""
     active = sorted((a for a in appointments if a.is_active), key=lambda a: (a.day, a.start))
@@ -414,6 +419,16 @@ class DashboardStats:
     occupancy: dict[int, float]
 
 
+@dataclass(frozen=True)
+class UtilizationSummary:
+    """Métricas derivadas da agenda persistida, sem inferir dados ausentes."""
+    open_windows: int
+    open_minutes: int
+    fit_in_count: int
+    recovered_minutes: int
+    occupancy_rate: float
+
+
 def dashboard_stats(conn: Database) -> DashboardStats:
     day = get_agenda_day(conn)
     appts = list_appointments(conn, day)
@@ -432,6 +447,22 @@ def dashboard_stats(conn: Database) -> DashboardStats:
         free_windows=len(windows),
         free_minutes=sum(w.length for w in windows),
         occupancy=occupancy,
+    )
+
+
+def utilization_summary(conn: Database) -> UtilizationSummary:
+    stats = dashboard_stats(conn)
+    appts = list_appointments(conn, stats.day)
+    profs = list_professionals(conn)
+    capacity = sum(p.day_end - p.day_start for p in profs)
+    booked = sum(a.duration for a in appts if a.is_active)
+    fit_ins = [a for a in appts if a.is_active and a.origin == ORIGIN_FIT_IN]
+    return UtilizationSummary(
+        open_windows=stats.free_windows,
+        open_minutes=stats.free_minutes,
+        fit_in_count=len(fit_ins),
+        recovered_minutes=sum(a.duration for a in fit_ins),
+        occupancy_rate=booked / max(capacity, 1),
     )
 
 

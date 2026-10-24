@@ -120,3 +120,8 @@ seed.py         dados fictícios
 styles.css      identidade visual
 tests/          pytest (motor, serviços, CSV e smoke test da UI)
 ```
+
+## Desenvolvimento
+
+- [Arquitetura](docs/ARCHITECTURE.md): camadas, métricas operacionais e limitações de sessão.
+- [Guia de contribuição](CONTRIBUTING.md): ambiente local, qualidade e regras para alterações.
