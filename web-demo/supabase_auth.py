@@ -52,6 +52,11 @@ class SupabaseAuth:
             raise AuthError("Não foi possível validar sua sessão. Tente novamente.") from exc
         if response.status_code >= 400:
             raise AuthError("Credenciais inválidas ou sessão expirada.")
+        # O endpoint de logout do GoTrue responde com 204 No Content após
+        # revogar a sessão. Tratar sucesso sem corpo evita apresentar um
+        # falso erro de sessão na interface.
+        if response.status_code == 204:
+            return {}
         try:
             return response.json()
         except ValueError as exc:

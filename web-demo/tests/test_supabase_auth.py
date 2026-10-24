@@ -43,5 +43,17 @@ def test_invalid_credentials_and_missing_configuration_are_safe():
         SupabaseAuth("https://project.supabase.co", "key", Http([Response(400, {})])).sign_in("a@example.test", "x")
 
 
+def test_logout_accepts_supabase_no_content_response():
+    class NoContent:
+        status_code = 204
+
+        def json(self):
+            raise ValueError("sem corpo")
+
+    session = AuthSession("access", "refresh", time.time() + 3600, "u1", "admin@example.test")
+    auth = SupabaseAuth("https://project.supabase.co", "publishable", Http([NoContent()]))
+    auth.sign_out(session)
+
+
 def test_expiration_is_proactively_detected():
     assert AuthSession("a", "r", time.time() + 10, "u", "e@example.test").expires_soon
