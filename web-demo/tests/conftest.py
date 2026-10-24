@@ -24,6 +24,9 @@ from seed import reset_demo  # noqa: E402
 
 DEMO_DAY = date(2026, 10, 23)
 PG_ADMIN_URL = os.environ.get("TEST_PG_ADMIN_URL")
+PG_EXISTING = bool(os.environ.get("TEST_PG_EXISTING_APP_URL"))
+PG_PROJECT_REF = os.environ.get("TEST_PG_PROJECT_REF")
+SENTINEL = "public.agende_bem_teste_sentinela"
 PG_TEST_DB = "agende_bem_test"
 BACKENDS = ["sqlite", "postgres"]
 
@@ -38,7 +41,15 @@ def _with_db(url: str, dbname: str, **extra) -> str:
 
 @pytest.fixture(scope="session")
 def pg_urls():
-    """Cria o banco de teste, aplica migrations e devolve (admin_url, app_url)."""
+    """Cria o banco de teste, aplica migrations e devolve (admin_url, app_url).
+
+    Modo "banco existente" (ex.: Supabase real já migrado): defina
+    TEST_PG_EXISTING_ADMIN_URL, TEST_PG_EXISTING_APP_URL e TEST_PG_PROJECT_REF.
+    Nada é criado além de uma tabela-sentinela temporária em public, removida ao final.
+    """
+    if PG_EXISTING:
+        yield from _existing_pg_urls()
+        return
     if not PG_ADMIN_URL:
         pytest.skip("TEST_PG_ADMIN_URL não definida: testes PostgreSQL ignorados.")
     import psycopg
@@ -65,11 +76,28 @@ def pg_urls():
             )
         )
         # Simula o "public" do Supabase com uma tabela que o reset nunca deve tocar.
-        admin.execute("CREATE TABLE public.sentinela (id int)")
-        admin.execute("INSERT INTO public.sentinela VALUES (1)")
+        admin.execute(f"CREATE TABLE {SENTINEL} (id int)")
+        admin.execute(f"INSERT INTO {SENTINEL} VALUES (1)")
     app_url = _with_db(PG_ADMIN_URL, PG_TEST_DB, user="agende_bem_app", password=password)
     yield admin_url, app_url
     database.close_pools()
+
+
+def _existing_pg_urls():
+    import psycopg
+
+    admin_url = os.environ["TEST_PG_EXISTING_ADMIN_URL"]
+    app_url = os.environ["TEST_PG_EXISTING_APP_URL"]
+    with psycopg.connect(admin_url, autocommit=True) as admin:
+        admin.execute(f"CREATE TABLE IF NOT EXISTS {SENTINEL} (id int)")
+        admin.execute(f"REVOKE ALL ON {SENTINEL} FROM anon, authenticated")
+        admin.execute(f"INSERT INTO {SENTINEL} VALUES (1)")
+    try:
+        yield admin_url, app_url
+    finally:
+        database.close_pools()
+        with psycopg.connect(admin_url, autocommit=True) as admin:
+            admin.execute(f"DROP TABLE IF EXISTS {SENTINEL}")
 
 
 @pytest.fixture(params=BACKENDS)

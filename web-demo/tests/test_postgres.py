@@ -6,7 +6,7 @@ import pytest
 import database
 import migrate
 import services
-from conftest import DEMO_DAY
+from conftest import DEMO_DAY, PG_EXISTING, PG_PROJECT_REF, SENTINEL
 from database import DatabaseError, IntegrityError, connect, secure_conninfo
 from models import ValidationError
 from seed import reset_demo
@@ -101,7 +101,7 @@ def test_app_role_has_no_ddl_and_no_other_schemas(pg):
     for sql in (
         "CREATE TABLE agende_bem.invasora (id int)",
         "CREATE TABLE public.invasora (id int)",
-        "SELECT * FROM public.sentinela",
+        f"SELECT * FROM {SENTINEL}",
         "DROP TABLE appointments",
         "TRUNCATE appointments",
     ):
@@ -137,7 +137,7 @@ def test_reset_only_touches_private_schema(pg, pg_urls):
     assert services.dashboard_stats(pg).cancelled == 0
     assert min(a.id for a in services.list_appointments(pg)) == 1  # identidade reiniciada
     with admin(pg_urls) as conn:
-        assert conn.execute("SELECT count(*) FROM public.sentinela").fetchone()[0] == 1
+        assert conn.execute(f"SELECT count(*) FROM {SENTINEL}").fetchone()[0] >= 1
 
 
 def test_seed_is_idempotent_under_concurrent_startup(pg):
@@ -154,6 +154,7 @@ def test_seed_is_idempotent_under_concurrent_startup(pg):
     assert len(services.list_professionals(pg)) == 3
 
 
+@pytest.mark.skipif(PG_EXISTING, reason="cria um banco vazio; só no cluster descartável")
 def test_app_refuses_unmigrated_database(pg_urls, monkeypatch):
     with admin(pg_urls) as conn:
         conn.execute("DROP DATABASE IF EXISTS agende_bem_vazio WITH (FORCE)")
@@ -166,7 +167,7 @@ def test_app_refuses_unmigrated_database(pg_urls, monkeypatch):
 # ------------------------------------------------------- migrations e TLS
 
 def test_migrations_are_idempotent(pg_urls):
-    assert migrate.migrate(pg_urls[0]) == []
+    assert migrate.migrate(pg_urls[0], PG_PROJECT_REF) == []
 
 
 def test_migrate_refuses_remote_target_without_matching_project_ref():

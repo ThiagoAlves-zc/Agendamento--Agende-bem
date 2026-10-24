@@ -12,6 +12,7 @@ pelas migrations (``migrate.py``), nunca pela aplicação.
 """
 from __future__ import annotations
 
+import atexit
 import os
 import sqlite3
 import threading
@@ -143,6 +144,8 @@ def _get_pool(url: str):
                 name="agende-bem",
                 open=True,
             )
+            if not _pools:
+                atexit.register(close_pools)  # encerra o pool antes do interpretador
             _pools[url] = pool
         return pool
 
