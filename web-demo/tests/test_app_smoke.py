@@ -28,12 +28,19 @@ def app(tmp_path, monkeypatch, backend, request):
 
 def test_all_pages_render(app):
     for page in PAGES:
-        app.radio(key="page").set_value(page).run()
+        slug = {
+            "Dashboard": "dashboard",
+            "Agenda": "agenda",
+            "Lista de espera": "espera",
+            "Sugestões": "sugestoes",
+            "Importar / Exportar": "dados",
+        }[page]
+        app.button(key=f"nav_{slug}").click().run()
         assert not app.exception, page
 
 
 def test_cancel_suggest_confirm_flow(app):
-    app.radio(key="page").set_value("Agenda").run()
+    app.button(key="nav_agenda").click().run()
     cancel = next(b for b in app.button if b.label == "Cancelar" and b.key == "cancel_4")  # Marcos Vieira
     cancel.click().run()
     app.button(key="confirm_4").click().run()
@@ -51,7 +58,7 @@ def test_cancel_suggest_confirm_flow(app):
 
 def test_import_by_pasted_csv(app):
     sample = (Path(APP).parent / "samples" / "agenda_exemplo.csv").read_text(encoding="utf-8")
-    app.radio(key="page").set_value("Importar / Exportar").run()
+    app.button(key="nav_dados").click().run()
     app.text_area(key="pasted_0").set_value(sample).run()
     assert not app.error
     next(b for b in app.button if b.label == "Importar agenda").click().run()

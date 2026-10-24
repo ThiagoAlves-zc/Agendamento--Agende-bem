@@ -40,7 +40,8 @@ st.set_page_config(
     page_title="Agende Bem — Agenda Inteligente",
     page_icon=":material/event_available:",
     layout="wide",
-    initial_sidebar_state="expanded",
+    # Em telas estreitas, o modo automático preserva o conteúdo e mantém o menu no controle nativo.
+    initial_sidebar_state="auto",
 )
 
 
@@ -64,17 +65,24 @@ def show_flash() -> None:
 
 def go(page: str) -> None:
     st.session_state.page = page
+    st.query_params["pagina"] = PAGE_SLUGS[page]
 
 
 def html(markup: str) -> None:
     st.markdown(markup, unsafe_allow_html=True)
 
 
-def page_head(eyebrow: str, title: str, subtitle: str) -> None:
+def page_head(eyebrow: str, title: str, subtitle: str, selected_day=None) -> None:
+    date_markup = ""
+    if selected_day is not None:
+        date_markup = (
+            '<div class="ab-head-date"><span>Data selecionada</span>'
+            f'<b>{escape(day_label(selected_day))}</b></div>'
+        )
     html(
-        f'<div class="ab-page-head"><div class="ab-eyebrow">{escape(eyebrow)}</div>'
+        f'<div class="ab-page-head"><div><div class="ab-eyebrow">{escape(eyebrow)}</div>'
         f'<div class="ab-title">{escape(title)}</div>'
-        f'<div class="ab-subtitle">{escape(subtitle)}</div></div>'
+        f'<div class="ab-subtitle">{escape(subtitle)}</div></div>{date_markup}</div>'
     )
 
 
@@ -96,16 +104,7 @@ def window_key(window: Window) -> tuple[int, int]:
 
 # -------------------------------------------------------------- callbacks
 
-def on_request_cancel(appointment_id: int) -> None:
-    st.session_state.pending_cancel = appointment_id
-
-
-def on_abort_cancel() -> None:
-    st.session_state.pop("pending_cancel", None)
-
-
 def on_confirm_cancel(appointment_id: int, patient: str) -> None:
-    st.session_state.pop("pending_cancel", None)
     try:
         window = services.cancel_appointment(db(), appointment_id)
     except ValidationError as exc:
@@ -123,21 +122,19 @@ def on_open_suggestions(key: tuple[int, int]) -> None:
     go("Sugestões")
 
 
-def on_select_candidate(waiting_id: int, professional_id: int, start: int) -> None:
-    st.session_state.selected_candidate = (waiting_id, professional_id, start)
-
-
-def on_abort_candidate() -> None:
-    st.session_state.pop("selected_candidate", None)
-
-
 def on_confirm_fit_in(waiting_id: int, professional_id: int, start: int, patient: str) -> None:
-    st.session_state.pop("selected_candidate", None)
     try:
         services.confirm_fit_in(db(), waiting_id, professional_id, start)
     except ValidationError as exc:
         flash("error", f"Encaixe não confirmado: {exc}")
         return
+    st.session_state.fit_success = {
+        "patient": patient,
+        "professional_id": professional_id,
+        "start": start,
+    }
+    # O marcador na URL mantém um estado de conclusão visível após uma reconexão.
+    st.query_params["encaixe"] = "confirmado"
     flash("success", f"Encaixe confirmado: {patient} às {fmt_time(start)}. Agenda e lista de espera atualizadas.")
     st.session_state.pop("focus_window", None)
     st.session_state.agenda_tab_hint = professional_id
@@ -158,6 +155,44 @@ def on_export() -> None:
     services.log_event(conn, "agenda_exportada", "appointments", None, "CSV exportado")
 
 
+def on_close_fit_success() -> None:
+    st.session_state.pop("fit_success", None)
+    st.query_params.pop("encaixe", None)
+
+
+@st.dialog("Cancelar atendimento")
+def cancel_dialog(appt) -> None:
+    """Confirmação explícita: abrir/fechar o diálogo não altera a agenda."""
+    st.markdown(f"Você está prestes a cancelar o atendimento de **{appt.patient_name}**.")
+    c1, c2 = st.columns(2)
+    c1.metric("Horário", f"{fmt_time(appt.start)}–{fmt_time(appt.end)}")
+    c2.metric("Duração", f"{appt.duration} min")
+    st.warning("O atendimento continuará no histórico com o status Cancelado.", icon=":material/warning:")
+    back, confirm = st.columns(2)
+    back.button("Voltar", key=f"back_{appt.id}", width="stretch")
+    confirm.button("Cancelar atendimento", key=f"confirm_{appt.id}", type="primary",
+                   on_click=on_confirm_cancel, args=(appt.id, appt.patient_name), width="stretch")
+
+
+@st.dialog("Confirmar encaixe")
+def fit_in_dialog(ev, professional_id: int, professional_name: str) -> None:
+    """Resumo antes da confirmação; o serviço revalida transacionalmente ao gravar."""
+    st.markdown(f"Confirme o encaixe de **{ev.entry.patient_name}** na agenda.")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Profissional", professional_name)
+    c2.metric("Horário", f"{fmt_time(ev.start)}–{fmt_time(ev.end)}")
+    c3.metric("Duração", f"{ev.entry.duration} min")
+    st.markdown("**Critérios atendidos**")
+    for reason in ev.reasons:
+        st.markdown(f"- {reason}")
+    st.caption("A disponibilidade será revalidada em transação antes de salvar.")
+    back, confirm = st.columns(2)
+    back.button("Voltar", key=f"undo_{ev.entry.id}", width="stretch")
+    confirm.button("Confirmar encaixe", key=f"confirm_fit_{ev.entry.id}", type="primary",
+                   on_click=on_confirm_fit_in,
+                   args=(ev.entry.id, professional_id, ev.start, ev.entry.patient_name), width="stretch")
+
+
 # ---------------------------------------------------------------- sidebar
 
 def sidebar(conn) -> str:
@@ -167,7 +202,19 @@ def sidebar(conn) -> str:
             '<div class="ab-brand-name">Agende Bem</div>'
             '<div class="ab-brand-tag">Agenda Inteligente</div></div></div>'
         )
-        page = st.radio("Navegação", PAGES, key="page", label_visibility="collapsed")
+        html('<div class="ab-nav-label">Navegação</div>')
+        page = st.session_state.page
+        navigation = [
+            ("dashboard", "Dashboard", ":material/dashboard:"),
+            ("agenda", "Agenda", ":material/calendar_month:"),
+            ("espera", "Lista de Espera", ":material/group:"),
+            ("sugestoes", "Sugestões", ":material/auto_awesome:"),
+            ("dados", "Importar / Exportar", ":material/import_export:"),
+        ]
+        for slug, label, icon in navigation:
+            target = PAGE_SLUGS_REVERSE[slug]
+            st.button(f"{icon}  {label}", key=f"nav_{slug}", width="stretch",
+                      type="primary" if page == target else "secondary", on_click=go, args=(target,))
         day = services.get_agenda_day(conn)
         html('<div class="ab-side-label">Dia de atendimento</div>'
              f'<div class="ab-side-date">{escape(day_label(day))}</div>')
@@ -178,7 +225,7 @@ def sidebar(conn) -> str:
             confirmed = st.checkbox("Confirmo a restauração", key="confirm_reset")
             st.button("Restaurar agora", on_click=on_reset_demo, disabled=not confirmed,
                       width="stretch")
-        html('<div class="ab-side-foot">Ambiente local de demonstração.<br>'
+        html('<div class="ab-side-foot">Ambiente de demonstração.<br>'
              'Todos os dados são fictícios.</div>')
     return page
 
@@ -188,19 +235,20 @@ def sidebar(conn) -> str:
 def page_dashboard(conn) -> None:
     stats = services.dashboard_stats(conn)
     profs = services.list_professionals(conn)
-    page_head("Visão geral", "Painel da recepção", day_label(stats.day))
+    page_head("Visão geral", "Painel da recepção",
+              "Acompanhe ocupação, fila de espera e oportunidades de encaixe.", stats.day)
 
     cards = [
-        ("", "Atendimentos", stats.total, f"{len(profs)} profissionais"),
-        ("green", "Confirmados", stats.confirmed, f"{stats.fit_ins} por encaixe"),
-        ("red", "Cancelamentos", stats.cancelled, "registros preservados"),
-        ("amber", "Em espera", stats.waiting, "pacientes aguardando"),
-        ("cyan", "Horários livres", stats.free_windows, f"{stats.free_minutes} min livres"),
+        ("", "Atendimentos", stats.total, f"{len(profs)} profissionais", "●"),
+        ("green", "Confirmados", stats.confirmed, f"{stats.fit_ins} por encaixe", "✓"),
+        ("amber", "Em espera", stats.waiting, "pacientes aguardando", "◷"),
+        ("cyan", "Horários livres", stats.free_windows, f"{stats.free_minutes} min livres", "○"),
     ]
     html('<div class="ab-metrics">' + "".join(
-        f'<div class="ab-metric {cls}"><div class="ab-metric-label">{escape(label)}</div>'
+        f'<div class="ab-metric {cls}"><div class="ab-metric-top"><div class="ab-metric-label">{escape(label)}</div>'
+        f'<span class="ab-metric-icon" aria-hidden="true">{icon}</span></div>'
         f'<div class="ab-metric-value">{value}</div><div class="ab-metric-note">{escape(note)}</div></div>'
-        for cls, label, value, note in cards
+        for cls, label, value, note, icon in cards
     ) + "</div>")
 
     # Destaque: horários liberados por cancelamento com candidatos compatíveis.
@@ -284,7 +332,24 @@ def page_agenda(conn) -> None:
     day = services.get_agenda_day(conn)
     profs = services.list_professionals(conn)
     appts = services.list_appointments(conn, day)
-    page_head("Agenda do dia", "Agenda por profissional", day_label(day))
+    page_head("Agenda do dia", "Agenda por profissional",
+              "Visualize atendimentos, vagas e cancelamentos por profissional.", day)
+
+    if st.query_params.get("encaixe") == "confirmado":
+        success = st.session_state.get("fit_success")
+        names = services.professional_names(conn)
+        if success:
+            detail = (f"{success['patient']} foi incluído(a) às {fmt_time(success['start'])} "
+                      f"com {names.get(success['professional_id'], 'o profissional selecionado')}.")
+        else:
+            detail = "O último encaixe foi salvo. A agenda abaixo já reflete a atualização."
+        with st.container(border=True):
+            st.success(f"Encaixe confirmado. {detail}", icon=":material/check_circle:")
+            c1, c2 = st.columns(2)
+            c1.button("Continuar na agenda", key="close_fit_success", on_click=on_close_fit_success,
+                      width="stretch")
+            c2.button("Ir para exportação", key="success_export", on_click=go,
+                      args=("Importar / Exportar",), width="stretch")
 
     hint = st.session_state.pop("agenda_tab_hint", None)
     if hint:
@@ -314,16 +379,8 @@ def page_agenda(conn) -> None:
                         html(badge(appt))
                     if appt.status == STATUS_CANCELLED:
                         continue
-                    if st.session_state.get("pending_cancel") == appt.id:
-                        c4.button("Voltar", key=f"back_{appt.id}", on_click=on_abort_cancel,
-                                  width="stretch")
-                        st.warning(f"Confirmar o cancelamento de **{appt.patient_name}** às "
-                                   f"{fmt_time(appt.start)}? O registro será mantido como cancelado.")
-                        st.button("Confirmar cancelamento", key=f"confirm_{appt.id}", type="primary",
-                                  on_click=on_confirm_cancel, args=(appt.id, appt.patient_name))
-                    else:
-                        c4.button("Cancelar", key=f"cancel_{appt.id}", on_click=on_request_cancel,
-                                  args=(appt.id,), width="stretch")
+                    if c4.button("Cancelar", key=f"cancel_{appt.id}", width="stretch"):
+                        cancel_dialog(appt)
 
 
 # --------------------------------------------------------- lista de espera
@@ -333,7 +390,7 @@ def page_waiting(conn) -> None:
     profs = services.list_professionals(conn)
     names = {p.id: p.name for p in profs}
     page_head("Lista de espera", "Pacientes aguardando encaixe",
-              "Cadastre quem aceita ser chamado caso um horário seja liberado.")
+              "Cadastre quem aceita ser chamado caso um horário seja liberado.", day)
 
     left, right = st.columns([1, 2.4], gap="medium")
     with left:
@@ -362,11 +419,18 @@ def page_waiting(conn) -> None:
                 st.rerun()
 
     with right:
+        search = st.text_input("Pesquisar paciente", key="waiting_search", placeholder="Nome, profissional ou situação")
         only_active = st.segmented_control("Exibir", ["Ativos", "Todos"], default="Ativos",
                                            label_visibility="collapsed") != "Todos"
         entries = services.list_waiting(conn, WAIT_ACTIVE if only_active else None)
+        if search.strip():
+            term = search.casefold().strip()
+            entries = [e for e in entries if term in e.patient_name.casefold()
+                       or term in e.status.casefold()
+                       or any(term in names.get(prof_id, "").casefold() for prof_id in e.professional_ids)]
         if not entries:
-            st.info("Nenhum paciente na lista de espera.")
+            st.info("Nenhum paciente corresponde à pesquisa." if search.strip()
+                    else "Nenhum paciente na lista de espera.")
             return
         table = pd.DataFrame([
             {
@@ -400,7 +464,7 @@ def page_suggestions(conn) -> None:
     names = services.professional_names(conn)
     appts = {a.id: a for a in services.list_appointments(conn, day)}
     page_head("Sugestões inteligentes", "Encaixes para horários livres",
-              "O sistema sugere; a recepção decide. Nenhuma vaga é preenchida sem confirmação.")
+              "O sistema sugere; a recepção decide. Nenhuma vaga é preenchida sem confirmação.", day)
 
     windows = services.available_windows(conn)
     if not windows:
@@ -432,8 +496,6 @@ def page_suggestions(conn) -> None:
     evaluations = services.evaluate_window(conn, window)
     eligible = [e for e in evaluations if e.eligible]
     rejected = [e for e in evaluations if not e.eligible]
-    selected = st.session_state.get("selected_candidate")
-
     st.markdown(f"#### {len(eligible)} candidato(s) elegível(is)")
     if not eligible:
         st.warning("Nenhum paciente da lista de espera atende a este horário. Veja os motivos abaixo.",
@@ -455,22 +517,9 @@ def page_suggestions(conn) -> None:
                     f'<ul class="ab-reasons">{reasons}</ul>'
                 )
             with c2:
-                if selected == args:
-                    st.button("Escolher outro", key=f"undo_{ev.entry.id}", on_click=on_abort_candidate,
-                              width="stretch")
-                else:
-                    st.button("Selecionar", key=f"pick_{ev.entry.id}", on_click=on_select_candidate,
-                              args=args, width="stretch",
-                              type="primary" if rank == 1 and not selected else "secondary")
-            if selected == args:
-                html(
-                    '<div class="ab-confirm">Confirmar o encaixe de '
-                    f'<b>{escape(ev.entry.patient_name)}</b> com <b>{escape(names.get(window.professional_id, ""))}</b> '
-                    f'das <b>{fmt_time(ev.start)} às {fmt_time(ev.end)}</b>? A disponibilidade será validada '
-                    'novamente antes de salvar.</div>'
-                )
-                st.button("Confirmar encaixe", key=f"confirm_fit_{ev.entry.id}", type="primary",
-                          on_click=on_confirm_fit_in, args=args + (ev.entry.patient_name,))
+                if st.button("Selecionar", key=f"pick_{ev.entry.id}", width="stretch",
+                             type="primary" if rank == 1 else "secondary"):
+                    fit_in_dialog(ev, window.professional_id, names.get(window.professional_id, ""))
 
     if rejected:
         with st.expander(f"Candidatos não elegíveis ({len(rejected)})"):
@@ -485,7 +534,7 @@ def page_suggestions(conn) -> None:
 def page_import_export(conn) -> None:
     day = services.get_agenda_day(conn)
     page_head("Dados", "Importar e exportar agenda",
-              "Importe um CSV de um único dia (até 3 profissionais) ou exporte a agenda atualizada.")
+              "Importe um CSV de um único dia (até 3 profissionais) ou exporte a agenda atualizada.", day)
     imp, exp = st.tabs(["Importar CSV", "Exportar agenda"])
 
     with imp:

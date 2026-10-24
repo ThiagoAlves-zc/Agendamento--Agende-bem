@@ -1,19 +1,20 @@
 /* Agende Bem — identidade visual (tema claro, azul-marinho + ciano) */
 :root {
-  --ab-navy: #0F2A4A;
-  --ab-navy-2: #12355B;
-  --ab-cyan: #00A6C8;
+  --ab-navy: #0C2748;
+  --ab-navy-2: #1C3554;
+  --ab-action: #2463D6;
+  --ab-cyan: #19B7C9;
   --ab-cyan-soft: #E0F6FA;
-  --ab-bg: #F5F7FA;
+  --ab-bg: #F4F7FB;
   --ab-surface: #FFFFFF;
-  --ab-border: #E2E8F0;
-  --ab-text: #1B2433;
-  --ab-muted: #64748B;
-  --ab-success: #15803D;
+  --ab-border: #DFE8F1;
+  --ab-text: #1C3554;
+  --ab-muted: #71849B;
+  --ab-success: #188257;
   --ab-success-soft: #E7F6EC;
   --ab-warn: #B45309;
   --ab-warn-soft: #FEF3E2;
-  --ab-danger: #B91C1C;
+  --ab-danger: #C94A51;
   --ab-danger-soft: #FDECEC;
   --ab-radius: 12px;
   --ab-shadow: 0 1px 2px rgba(15, 42, 74, .06), 0 4px 16px rgba(15, 42, 74, .05);
@@ -38,30 +39,25 @@ html, body, .stApp, .stMarkdown, p, label, input, textarea, button, h1, h2, h3, 
   border-right: none;
 }
 [data-testid="stSidebar"] * { color: #DCE6F2; }
-[data-testid="stSidebar"] [role="radiogroup"] { gap: 2px; }
-[data-testid="stSidebar"] [role="radiogroup"] label {
-  padding: .55rem .75rem;
-  border-radius: 8px;
-  width: 100%;
-  transition: background .15s ease;
-}
-[data-testid="stSidebar"] [role="radiogroup"] label:hover { background: rgba(255, 255, 255, .06); }
-[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {
-  background: rgba(0, 166, 200, .18);
-  box-shadow: inset 3px 0 0 var(--ab-cyan);
-}
-[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) p { color: #FFFFFF; font-weight: 600; }
-[data-testid="stSidebar"] [role="radiogroup"] label > div > div:first-child:not([data-testid]) { display: none; }
 [data-testid="stSidebar"] [data-testid="stExpander"] details {
   border-color: rgba(255, 255, 255, .14);
   background: rgba(255, 255, 255, .03);
 }
-[data-testid="stSidebar"] .stButton button {
+[data-testid="stSidebar"] button[kind="primary"] {
   background: var(--ab-cyan);
   border-color: var(--ab-cyan);
 }
-[data-testid="stSidebar"] .stButton button p { color: #fff; }
-[data-testid="stSidebar"] .stButton button:disabled { opacity: .45; }
+[data-testid="stSidebar"] button[kind="primary"] p { color: #fff; }
+[data-testid="stSidebar"] button[kind="secondary"] {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: inset 3px 0 0 transparent;
+}
+[data-testid="stSidebar"] button[kind="secondary"]:hover {
+  background: rgba(255, 255, 255, .08);
+  border-color: rgba(255, 255, 255, .08);
+}
+[data-testid="stSidebar"] button:disabled { opacity: .45; }
 
 .ab-brand { display: flex; align-items: center; gap: .7rem; margin: .25rem 0 1.4rem; }
 .ab-logo {
@@ -72,6 +68,10 @@ html, body, .stApp, .stMarkdown, p, label, input, textarea, button, h1, h2, h3, 
 }
 .ab-brand-name { font-weight: 700; font-size: 1.12rem; color: #fff !important; line-height: 1.1; }
 .ab-brand-tag { font-size: .78rem; color: #8FB3D1 !important; letter-spacing: .02em; }
+.ab-nav-label {
+  font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .09em;
+  color: #7E9AB8 !important; margin: .25rem 0 .5rem;
+}
 .ab-side-label {
   font-size: .7rem; text-transform: uppercase; letter-spacing: .09em;
   color: #7E9AB8 !important; margin: 1.2rem 0 .35rem;
@@ -83,16 +83,22 @@ html, body, .stApp, .stMarkdown, p, label, input, textarea, button, h1, h2, h3, 
 .ab-side-foot { font-size: .74rem; color: #7E9AB8 !important; margin-top: 1.6rem; line-height: 1.45; }
 
 /* Cabeçalho de página */
-.ab-page-head { margin-bottom: 1.4rem; }
+.ab-page-head { margin-bottom: 1.4rem; display: flex; justify-content: space-between; gap: 1rem; align-items: end; }
 .ab-eyebrow {
   font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .1em;
   color: var(--ab-cyan);
 }
 .ab-title { font-size: 1.75rem; font-weight: 700; color: var(--ab-navy); margin: .15rem 0 .25rem; letter-spacing: -.01em; }
 .ab-subtitle { color: var(--ab-muted); font-size: .95rem; }
+.ab-head-date {
+  background: var(--ab-surface); border: 1px solid var(--ab-border); border-radius: 10px;
+  padding: .6rem .8rem; min-width: 190px; box-shadow: var(--ab-shadow);
+}
+.ab-head-date span { display: block; color: var(--ab-muted); font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; }
+.ab-head-date b { display: block; color: var(--ab-navy); font-size: .84rem; margin-top: .15rem; }
 
 /* Cartões de indicadores */
-.ab-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; margin-bottom: 1.4rem; }
+.ab-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 1.4rem; }
 .ab-metric {
   background: var(--ab-surface); border: 1px solid var(--ab-border); border-radius: var(--ab-radius);
   padding: 1rem 1.1rem; box-shadow: var(--ab-shadow); position: relative; overflow: hidden;
@@ -102,7 +108,12 @@ html, body, .stApp, .stMarkdown, p, label, input, textarea, button, h1, h2, h3, 
 .ab-metric.green::before { background: var(--ab-success); }
 .ab-metric.red::before { background: var(--ab-danger); }
 .ab-metric.amber::before { background: var(--ab-warn); }
+.ab-metric-top { display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
 .ab-metric-label { font-size: .72rem; color: var(--ab-muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.ab-metric-icon {
+  color: var(--ab-navy-2); background: #EEF4F9; border-radius: 7px; padding: .08rem .38rem;
+  font-size: .9rem; font-weight: 700; line-height: 1.1;
+}
 .ab-metric-value { font-size: 2rem; font-weight: 700; color: var(--ab-navy); line-height: 1.15; margin-top: .3rem; }
 .ab-metric-note { font-size: .8rem; color: var(--ab-muted); margin-top: .15rem; }
 
@@ -183,8 +194,6 @@ html, body, .stApp, .stMarkdown, p, label, input, textarea, button, h1, h2, h3, 
 .stButton button, .stDownloadButton button, .stFormSubmitButton button { border-radius: 8px; font-weight: 600; }
 [data-testid="stVerticalBlockBorderWrapper"] { border-radius: var(--ab-radius); }
 [data-testid="stForm"] { background: var(--ab-surface); border-color: var(--ab-border); border-radius: var(--ab-radius); }
-.stTabs [data-baseweb="tab-list"] { gap: 4px; }
-.stTabs [data-baseweb="tab"] { font-weight: 600; }
 
 /* Responsividade */
 @media (max-width: 1100px) {
@@ -194,5 +203,7 @@ html, body, .stApp, .stMarkdown, p, label, input, textarea, button, h1, h2, h3, 
   .ab-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ab-title { font-size: 1.4rem; }
   .ab-window { gap: 1rem; }
+  .ab-page-head { align-items: stretch; flex-direction: column; }
+  .ab-head-date { min-width: 0; }
 }
 .ab-alt-download { display: inline-block; margin-top: .6rem; font-size: .85rem; color: var(--ab-navy-2); }

@@ -11,10 +11,10 @@ serverAddress = "localhost"
 
 [theme]
 base = "light"
-primaryColor = "#12355B"
-backgroundColor = "#F5F7FA"
+primaryColor = "#2463D6"
+backgroundColor = "#F4F7FB"
 secondaryBackgroundColor = "#EAF0F6"
-textColor = "#1B2433"
+textColor = "#1C3554"
 font = "sans serif"
 
 [client]
