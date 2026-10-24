@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import csv
 import io
-import sqlite3
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import date
@@ -11,6 +10,7 @@ from datetime import date
 import pandas as pd
 
 import services
+from database import Database, IntegrityError
 from models import (
     Appointment,
     MAX_PROFESSIONALS,
@@ -173,10 +173,13 @@ def parse_agenda_csv(raw: bytes) -> ParsedAgenda:
     return result
 
 
-def import_agenda(conn: sqlite3.Connection, parsed: ParsedAgenda) -> dict:
+def import_agenda(conn: Database, parsed: ParsedAgenda) -> dict:
     if not parsed.ok or parsed.day is None:
         raise ValidationError("Corrija as inconsistências antes de importar.")
-    return services.replace_agenda(conn, parsed.day, parsed.rows)
+    try:
+        return services.replace_agenda(conn, parsed.day, parsed.rows)
+    except IntegrityError:
+        raise ValidationError("O arquivo contém consultas sobrepostas para o mesmo profissional.")
 
 
 def sanitize_cell(value) -> str:
@@ -187,7 +190,7 @@ def sanitize_cell(value) -> str:
     return text
 
 
-def export_agenda_csv(conn: sqlite3.Connection) -> bytes:
+def export_agenda_csv(conn: Database) -> bytes:
     """Exporta a agenda do dia (inclui cancelamentos e encaixes) em CSV ';' UTF-8."""
     day = services.get_agenda_day(conn)
     profs = {p.id: p for p in services.list_professionals(conn)}

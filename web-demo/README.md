@@ -9,7 +9,7 @@ que não foi alterada. Não há conexão com o MySQL antigo nem reaproveitamento
 
 ## Stack
 
-Python 3.11+ · Streamlit · SQLite · Pandas · Pytest. Sem serviços externos.
+Python 3.11+ (imagem de produção: 3.14) · Streamlit · SQLite ou PostgreSQL · Pandas · Pytest.
 
 ## Como executar
 
@@ -17,7 +17,7 @@ Python 3.11+ · Streamlit · SQLite · Pandas · Pytest. Sem serviços externos.
 cd web-demo
 python -m venv .venv
 # Windows:  .venv\Scripts\activate      Linux/macOS:  source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 streamlit run app.py
 ```
 
@@ -30,6 +30,20 @@ fictícios. Os dados persistem entre reinicializações.
 - Restaurar o cenário: barra lateral → *Restaurar dados de demonstração* (com confirmação),
   ou `python seed.py`.
 - Testes: `python -m pytest -q`.
+
+## Banco de dados
+
+- **Local (padrão):** SQLite em `data/agende_bem.db`, migrations aplicadas automaticamente.
+- **Remoto:** defina `DATABASE_URL` (PostgreSQL/Supabase, TLS obrigatório). As migrations
+  ficam em `migrations/postgres/` e são aplicadas pelo operador com `migrate.py`.
+  Guia completo de implantação (Vercel + Supabase): [DEPLOY.md](DEPLOY.md).
+
+Testes no PostgreSQL (banco descartável, criado do zero pelo próprio teste):
+
+```bash
+pip install -r requirements-dev.txt
+TEST_PG_ADMIN_URL=postgresql://postgres@127.0.0.1:55432/postgres python -m pytest -q
+```
 
 ## Telas
 

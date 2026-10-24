@@ -195,3 +195,4 @@ html, body, .stApp, .stMarkdown, p, label, input, textarea, button, h1, h2, h3, 
   .ab-title { font-size: 1.4rem; }
   .ab-window { gap: 1rem; }
 }
+.ab-alt-download { display: inline-block; margin-top: .6rem; font-size: .85rem; color: var(--ab-navy-2); }

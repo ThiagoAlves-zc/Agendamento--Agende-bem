@@ -9,11 +9,10 @@ duração, disponibilidade e conflito de horário.
 """
 from __future__ import annotations
 
-import sqlite3
 from datetime import date, timedelta
 
-from database import connect, init_db, transaction
-from services import log_event, set_agenda_day
+from database import Database, connect, init_db, transaction
+from services import _insert, log_event, set_agenda_day
 
 PROFESSIONALS = [
     # nome, especialidade, início, fim do expediente
@@ -57,28 +56,50 @@ WAITING = [
 ]
 
 
-def reset_demo(conn: sqlite3.Connection, day: date | None = None) -> None:
-    """Apaga apenas os dados do banco local e recria o cenário de demonstração."""
+TABLES = ("audit_events", "appointments", "waiting_list", "professionals", "settings")
+
+
+def _clear(conn: Database) -> None:
+    """Esvazia somente as tabelas do Agende Bem (nomes fixos, sem entrada do usuário)."""
+    if conn.dialect == "postgres":
+        # Função SECURITY DEFINER da migration 0003: o papel da aplicação não tem TRUNCATE.
+        conn.execute("SELECT agende_bem.reset_demo_data()")
+        return
+    for table in TABLES:
+        conn.execute(f"DELETE FROM {table}")
+    conn.execute("DELETE FROM sqlite_sequence")
+
+
+def _is_empty(conn: Database) -> bool:
+    return conn.execute("SELECT COUNT(*) AS n FROM professionals").fetchone()["n"] == 0
+
+
+def reset_demo(conn: Database, day: date | None = None, only_if_empty: bool = False) -> bool:
+    """Recria o cenário de demonstração em uma transação. Retorna se houve carga.
+
+    ``only_if_empty`` verifica o banco já dentro da transação (com o bloqueio de
+    escrita), evitando carga duplicada quando duas instâncias iniciam juntas.
+    """
     day = day or date.today()
     init_db(conn)
     with transaction(conn):
-        for table in ("audit_events", "appointments", "waiting_list", "professionals", "settings"):
-            conn.execute(f"DELETE FROM {table}")  # nomes fixos, sem entrada do usuário
-        conn.execute("DELETE FROM sqlite_sequence")
+        if only_if_empty and not _is_empty(conn):
+            return False
+        _clear(conn)
 
         ids = []
         for name, specialty, start, end in PROFESSIONALS:
-            cur = conn.execute(
+            ids.append(_insert(
+                conn,
                 "INSERT INTO professionals (name, specialty, day_start, day_end) VALUES (?, ?, ?, ?)",
                 (name, specialty, start, end),
-            )
-            ids.append(cur.lastrowid)
+            ))
 
         for prof, start, duration, patient in APPOINTMENTS:
             conn.execute(
                 "INSERT INTO appointments (patient_name, professional_id, day, start_time, duration_min) "
                 "VALUES (?, ?, ?, ?, ?)",
-                (patient, ids[prof], day.isoformat(), start, duration),
+                (patient, ids[prof], day, start, duration),
             )
 
         for patient, profs, duration, start, end, days, notes in WAITING:
@@ -91,22 +112,22 @@ def reset_demo(conn: sqlite3.Connection, day: date | None = None) -> None:
                     duration,
                     start,
                     end,
-                    (day - timedelta(days=days)).isoformat(),
+                    day - timedelta(days=days),
                     notes,
                 ),
             )
 
         set_agenda_day(conn, day)
         log_event(conn, "dados_demo_restaurados", "system", None, "Cenário de demonstração carregado")
+    return True
 
 
-def ensure_seeded(conn: sqlite3.Connection) -> bool:
+def ensure_seeded(conn: Database) -> bool:
     """Carrega a demonstração somente se o banco estiver vazio."""
     init_db(conn)
-    if conn.execute("SELECT COUNT(*) FROM professionals").fetchone()[0] == 0:
-        reset_demo(conn)
-        return True
-    return False
+    if not _is_empty(conn):
+        return False
+    return reset_demo(conn, only_if_empty=True)
 
 
 if __name__ == "__main__":

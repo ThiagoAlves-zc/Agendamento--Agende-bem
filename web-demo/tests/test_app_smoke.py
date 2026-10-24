@@ -4,13 +4,22 @@ from pathlib import Path
 import pytest
 from streamlit.testing.v1 import AppTest
 
+from conftest import DEMO_DAY
+from database import connect
+from seed import reset_demo
+
 APP = str(Path(__file__).resolve().parents[1] / "app.py")
 PAGES = ["Dashboard", "Agenda", "Lista de espera", "Sugestões", "Importar / Exportar"]
 
 
 @pytest.fixture
-def app(tmp_path, monkeypatch):
-    monkeypatch.setenv("AGENDE_BEM_DB", str(tmp_path / "ui.db"))
+def app(tmp_path, monkeypatch, backend, request):
+    if backend == "sqlite":
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        monkeypatch.setenv("AGENDE_BEM_DB", str(tmp_path / "ui.db"))
+    else:
+        monkeypatch.setenv("DATABASE_URL", request.getfixturevalue("pg_urls")[1])
+        reset_demo(connect(), DEMO_DAY)
     at = AppTest.from_file(APP, default_timeout=30)
     at.run()
     assert not at.exception
@@ -38,3 +47,13 @@ def test_cancel_suggest_confirm_flow(app):
     assert not app.exception
     assert app.session_state["page"] == "Agenda"
     assert any("Paula Andrade" in s.value for s in app.success)
+
+
+def test_import_by_pasted_csv(app):
+    sample = (Path(APP).parent / "samples" / "agenda_exemplo.csv").read_text(encoding="utf-8")
+    app.radio(key="page").set_value("Importar / Exportar").run()
+    app.text_area(key="pasted_0").set_value(sample).run()
+    assert not app.error
+    next(b for b in app.button if b.label == "Importar agenda").click().run()
+    assert not app.exception
+    assert any("22 consultas" in s.value for s in app.success)

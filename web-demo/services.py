@@ -1,13 +1,13 @@
-"""Operações da agenda sobre o SQLite (consultas parametrizadas, sem SQL concatenado)."""
+"""Operações da agenda sobre SQLite ou PostgreSQL (consultas parametrizadas, sem SQL concatenado)."""
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import dataclass
-from datetime import date
-from typing import Iterable
+from datetime import date, datetime
+from typing import Iterable, Mapping
+from zoneinfo import ZoneInfo
 
 import scheduler
-from database import transaction
+from database import Database, IntegrityError, transaction
 from models import (
     Appointment,
     Evaluation,
@@ -32,11 +32,12 @@ from models import (
 )
 
 MAX_NOTES = 200
+LOCAL_TZ = ZoneInfo("America/Sao_Paulo")
 
 
 # ------------------------------------------------------------------ helpers
 
-def _professional(row: sqlite3.Row) -> Professional:
+def _professional(row: Mapping) -> Professional:
     return Professional(
         id=row["id"],
         name=row["name"],
@@ -46,7 +47,7 @@ def _professional(row: sqlite3.Row) -> Professional:
     )
 
 
-def _appointment(row: sqlite3.Row) -> Appointment:
+def _appointment(row: Mapping) -> Appointment:
     return Appointment(
         id=row["id"],
         patient_name=row["patient_name"],
@@ -59,7 +60,7 @@ def _appointment(row: sqlite3.Row) -> Appointment:
     )
 
 
-def _waiting(row: sqlite3.Row) -> WaitingEntry:
+def _waiting(row: Mapping) -> WaitingEntry:
     ids = tuple(int(x) for x in row["professional_ids"].split(",") if x)
     return WaitingEntry(
         id=row["id"],
@@ -74,8 +75,13 @@ def _waiting(row: sqlite3.Row) -> WaitingEntry:
     )
 
 
+def _insert(conn: Database, sql: str, params: tuple) -> int:
+    """INSERT ... RETURNING id (SQLite >= 3.35 e PostgreSQL)."""
+    return conn.execute(sql + " RETURNING id", params).fetchone()["id"]
+
+
 def log_event(
-    conn: sqlite3.Connection, event_type: str, entity: str, entity_id: int | None, details: str
+    conn: Database, event_type: str, entity: str, entity_id: int | None, details: str
 ) -> None:
     conn.execute(
         "INSERT INTO audit_events (event_type, entity, entity_id, details) VALUES (?, ?, ?, ?)",
@@ -83,11 +89,18 @@ def log_event(
     )
 
 
-def recent_events(conn: sqlite3.Connection, limit: int = 8) -> list[sqlite3.Row]:
-    return conn.execute(
+def recent_events(conn: Database, limit: int = 8) -> list[dict]:
+    rows = conn.execute(
         "SELECT created_at, event_type, details FROM audit_events ORDER BY id DESC LIMIT ?",
         (limit,),
     ).fetchall()
+    events = []
+    for row in rows:
+        created = row["created_at"]
+        if isinstance(created, datetime):  # PostgreSQL devolve timestamptz
+            created = created.astimezone(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S")
+        events.append({"created_at": str(created), "event_type": row["event_type"], "details": row["details"]})
+    return events
 
 
 def find_overlaps(appointments: Iterable[Appointment]) -> list[str]:
@@ -113,12 +126,12 @@ def find_overlaps(appointments: Iterable[Appointment]) -> list[str]:
 
 # ----------------------------------------------------------- configuração
 
-def get_agenda_day(conn: sqlite3.Connection) -> date:
+def get_agenda_day(conn: Database) -> date:
     row = conn.execute("SELECT value FROM settings WHERE key = 'agenda_day'").fetchone()
     return parse_date(row["value"]) if row else date.today()
 
 
-def set_agenda_day(conn: sqlite3.Connection, day: date) -> None:
+def set_agenda_day(conn: Database, day: date) -> None:
     conn.execute(
         "INSERT INTO settings (key, value) VALUES ('agenda_day', ?) "
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -128,46 +141,47 @@ def set_agenda_day(conn: sqlite3.Connection, day: date) -> None:
 
 # ------------------------------------------------------------ profissionais
 
-def list_professionals(conn: sqlite3.Connection) -> list[Professional]:
+def list_professionals(conn: Database) -> list[Professional]:
     rows = conn.execute("SELECT * FROM professionals WHERE active = 1 ORDER BY id").fetchall()
     return [_professional(r) for r in rows]
 
 
-def professional_names(conn: sqlite3.Connection) -> dict[int, str]:
+def professional_names(conn: Database) -> dict[int, str]:
     return {p.id: p.name for p in list_professionals(conn)}
 
 
 def add_professional(
-    conn: sqlite3.Connection, name: str, specialty: str, day_start: str, day_end: str
+    conn: Database, name: str, specialty: str, day_start: str, day_end: str
 ) -> int:
     name = validate_name(name, "Nome do profissional")
     start, end = parse_time(day_start), parse_time(day_end)
     validate_interval(start, end, "Expediente")
     with transaction(conn):
-        count = conn.execute("SELECT COUNT(*) FROM professionals WHERE active = 1").fetchone()[0]
+        count = conn.execute("SELECT COUNT(*) AS n FROM professionals WHERE active = 1").fetchone()["n"]
         if count >= MAX_PROFESSIONALS:
             raise ValidationError(f"Limite de {MAX_PROFESSIONALS} profissionais atingido.")
-        cur = conn.execute(
+        new_id = _insert(
+            conn,
             "INSERT INTO professionals (name, specialty, day_start, day_end) VALUES (?, ?, ?, ?)",
             (name, specialty.strip()[:60], fmt_time(start), fmt_time(end)),
         )
-        log_event(conn, "profissional_cadastrado", "professionals", cur.lastrowid, name)
-    return cur.lastrowid
+        log_event(conn, "profissional_cadastrado", "professionals", new_id, name)
+    return new_id
 
 
 # ------------------------------------------------------------- agendamentos
 
-def list_appointments(conn: sqlite3.Connection, day: date | None = None) -> list[Appointment]:
+def list_appointments(conn: Database, day: date | None = None) -> list[Appointment]:
     day = day or get_agenda_day(conn)
     rows = conn.execute(
         "SELECT * FROM appointments WHERE day = ? ORDER BY start_time, professional_id, id",
-        (day.isoformat(),),
+        (day,),
     ).fetchall()
     return [_appointment(r) for r in rows]
 
 
 def create_appointment(
-    conn: sqlite3.Connection,
+    conn: Database,
     patient_name: str,
     professional_id: int,
     start: str,
@@ -189,16 +203,17 @@ def create_appointment(
         problems = find_overlaps(list_appointments(conn, day) + [candidate])
         if problems:
             raise ValidationError(problems[0])
-        cur = conn.execute(
+        new_id = _insert(
+            conn,
             "INSERT INTO appointments (patient_name, professional_id, day, start_time, duration_min) "
             "VALUES (?, ?, ?, ?, ?)",
-            (patient_name, professional_id, day.isoformat(), fmt_time(start_min), duration),
+            (patient_name, professional_id, day, fmt_time(start_min), duration),
         )
-        log_event(conn, "consulta_criada", "appointments", cur.lastrowid, patient_name)
-    return cur.lastrowid
+        log_event(conn, "consulta_criada", "appointments", new_id, patient_name)
+    return new_id
 
 
-def cancel_appointment(conn: sqlite3.Connection, appointment_id: int) -> Window | None:
+def cancel_appointment(conn: Database, appointment_id: int) -> Window | None:
     """Marca a consulta como cancelada (preserva o registro) e retorna a janela liberada."""
     with transaction(conn):
         row = conn.execute("SELECT * FROM appointments WHERE id = ?", (appointment_id,)).fetchone()
@@ -208,8 +223,7 @@ def cancel_appointment(conn: sqlite3.Connection, appointment_id: int) -> Window 
         if appt.status != STATUS_CONFIRMED:
             raise ValidationError("Esta consulta já está cancelada.")
         conn.execute(
-            "UPDATE appointments SET status = ?, cancelled_at = datetime('now', 'localtime') "
-            "WHERE id = ?",
+            f"UPDATE appointments SET status = ?, cancelled_at = {conn.now_sql} WHERE id = ?",
             (STATUS_CANCELLED, appointment_id),
         )
         log_event(
@@ -225,7 +239,7 @@ def cancel_appointment(conn: sqlite3.Connection, appointment_id: int) -> Window 
         )
 
 
-def _get_professional(conn: sqlite3.Connection, professional_id: int) -> Professional:
+def _get_professional(conn: Database, professional_id: int) -> Professional:
     row = conn.execute(
         "SELECT * FROM professionals WHERE id = ? AND active = 1", (int(professional_id),)
     ).fetchone()
@@ -236,7 +250,7 @@ def _get_professional(conn: sqlite3.Connection, professional_id: int) -> Profess
 
 # ----------------------------------------------------------- lista de espera
 
-def list_waiting(conn: sqlite3.Connection, status: str | None = None) -> list[WaitingEntry]:
+def list_waiting(conn: Database, status: str | None = None) -> list[WaitingEntry]:
     if status:
         rows = conn.execute(
             "SELECT * FROM waiting_list WHERE status = ? ORDER BY id", (status,)
@@ -247,7 +261,7 @@ def list_waiting(conn: sqlite3.Connection, status: str | None = None) -> list[Wa
 
 
 def add_waiting(
-    conn: sqlite3.Connection,
+    conn: Database,
     patient_name: str,
     professional_ids: Iterable[int],
     duration: int,
@@ -275,7 +289,8 @@ def add_waiting(
         valid = set(professional_names(conn))
         if not set(ids) <= valid:
             raise ValidationError("Profissional inválido na seleção.")
-        cur = conn.execute(
+        new_id = _insert(
+            conn,
             "INSERT INTO waiting_list (patient_name, professional_ids, duration_min, "
             "available_from, available_until, requested_on, notes) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
@@ -284,15 +299,15 @@ def add_waiting(
                 duration,
                 fmt_time(start),
                 fmt_time(end),
-                requested.isoformat(),
+                requested,
                 notes,
             ),
         )
-        log_event(conn, "espera_cadastrada", "waiting_list", cur.lastrowid, patient_name)
-    return cur.lastrowid
+        log_event(conn, "espera_cadastrada", "waiting_list", new_id, patient_name)
+    return new_id
 
 
-def remove_waiting(conn: sqlite3.Connection, waiting_id: int) -> None:
+def remove_waiting(conn: Database, waiting_id: int) -> None:
     with transaction(conn):
         cur = conn.execute(
             "UPDATE waiting_list SET status = ? WHERE id = ? AND status = ?",
@@ -305,7 +320,7 @@ def remove_waiting(conn: sqlite3.Connection, waiting_id: int) -> None:
 
 # -------------------------------------------------------------- sugestões
 
-def available_windows(conn: sqlite3.Connection) -> list[Window]:
+def available_windows(conn: Database) -> list[Window]:
     day = get_agenda_day(conn)
     appts = list_appointments(conn, day)
     windows: list[Window] = []
@@ -314,7 +329,7 @@ def available_windows(conn: sqlite3.Connection) -> list[Window]:
     return windows
 
 
-def evaluate_window(conn: sqlite3.Connection, window: Window) -> list[Evaluation]:
+def evaluate_window(conn: Database, window: Window) -> list[Evaluation]:
     return scheduler.evaluate_candidates(
         window,
         list_appointments(conn, window.day),
@@ -325,7 +340,7 @@ def evaluate_window(conn: sqlite3.Connection, window: Window) -> list[Evaluation
 
 
 def confirm_fit_in(
-    conn: sqlite3.Connection, waiting_id: int, professional_id: int, start: int
+    conn: Database, waiting_id: int, professional_id: int, start: int
 ) -> int:
     """Confirma o encaixe após revalidar a disponibilidade, em uma única transação."""
     with transaction(conn):
@@ -350,22 +365,27 @@ def confirm_fit_in(
         if ev.start != start:
             raise ValidationError("A disponibilidade mudou. Atualize as sugestões.")
 
-        cur = conn.execute(
-            "INSERT INTO appointments (patient_name, professional_id, day, start_time, "
-            "duration_min, status, origin, replaces_id, waiting_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                entry.patient_name,
-                prof.id,
-                day.isoformat(),
-                fmt_time(start),
-                entry.duration,
-                STATUS_CONFIRMED,
-                ORIGIN_FIT_IN,
-                window.cancelled_appointment_id,
-                entry.id,
-            ),
-        )
+        try:
+            new_id = _insert(
+                conn,
+                "INSERT INTO appointments (patient_name, professional_id, day, start_time, "
+                "duration_min, status, origin, replaces_id, waiting_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    entry.patient_name,
+                    prof.id,
+                    day,
+                    fmt_time(start),
+                    entry.duration,
+                    STATUS_CONFIRMED,
+                    ORIGIN_FIT_IN,
+                    window.cancelled_appointment_id,
+                    entry.id,
+                ),
+            )
+        except IntegrityError:
+            # Restrição do banco: outro encaixe ocupou o horário ao mesmo tempo.
+            raise ValidationError("O horário acabou de ser ocupado. Atualize as sugestões.")
         conn.execute(
             "UPDATE waiting_list SET status = ? WHERE id = ?", (WAIT_SCHEDULED, entry.id)
         )
@@ -373,10 +393,10 @@ def confirm_fit_in(
             conn,
             "encaixe_confirmado",
             "appointments",
-            cur.lastrowid,
+            new_id,
             f"{entry.patient_name} com {prof.name} às {fmt_time(start)} ({entry.duration} min)",
         )
-    return cur.lastrowid
+    return new_id
 
 
 # --------------------------------------------------------------- dashboard
@@ -394,7 +414,7 @@ class DashboardStats:
     occupancy: dict[int, float]
 
 
-def dashboard_stats(conn: sqlite3.Connection) -> DashboardStats:
+def dashboard_stats(conn: Database) -> DashboardStats:
     day = get_agenda_day(conn)
     appts = list_appointments(conn, day)
     windows = available_windows(conn)
@@ -427,7 +447,7 @@ class ImportRow:
     status: str
 
 
-def replace_agenda(conn: sqlite3.Connection, day: date, rows: list[ImportRow]) -> dict:
+def replace_agenda(conn: Database, day: date, rows: list[ImportRow]) -> dict:
     """Substitui a agenda do dia pelos dados importados, em uma única transação.
 
     Os profissionais passam a ser exatamente os do arquivo (máximo de três);
@@ -453,20 +473,24 @@ def replace_agenda(conn: sqlite3.Connection, day: date, rows: list[ImportRow]) -
                 start = min(parse_time(existing["day_start"]), first)
                 end = max(parse_time(existing["day_end"]), last)
                 conn.execute(
-                    "UPDATE professionals SET active = 1, day_start = ?, day_end = ?, "
-                    "specialty = CASE WHEN ? <> '' THEN ? ELSE specialty END WHERE id = ?",
-                    (fmt_time(start), fmt_time(end), specialty, specialty, existing["id"]),
+                    "UPDATE professionals SET active = 1, day_start = ?, day_end = ? WHERE id = ?",
+                    (fmt_time(start), fmt_time(end), existing["id"]),
                 )
+                if specialty:
+                    conn.execute(
+                        "UPDATE professionals SET specialty = ? WHERE id = ?",
+                        (specialty, existing["id"]),
+                    )
                 ids[name] = existing["id"]
             else:
                 start = min(parse_time("08:00"), first)
                 end = max(parse_time("18:00"), last)
-                cur = conn.execute(
+                ids[name] = _insert(
+                    conn,
                     "INSERT INTO professionals (name, specialty, day_start, day_end) "
                     "VALUES (?, ?, ?, ?)",
                     (name, specialty, fmt_time(start), fmt_time(end)),
                 )
-                ids[name] = cur.lastrowid
 
         keep = set(ids.values())
         for row in conn.execute("SELECT id FROM professionals WHERE active = 1").fetchall():
@@ -474,7 +498,7 @@ def replace_agenda(conn: sqlite3.Connection, day: date, rows: list[ImportRow]) -
                 conn.execute("UPDATE professionals SET active = 0 WHERE id = ?", (row["id"],))
 
         removed = conn.execute(
-            "DELETE FROM appointments WHERE day = ?", (day.isoformat(),)
+            "DELETE FROM appointments WHERE day = ?", (day,)
         ).rowcount
         for r in rows:
             conn.execute(
@@ -483,7 +507,7 @@ def replace_agenda(conn: sqlite3.Connection, day: date, rows: list[ImportRow]) -
                 (
                     r.patient_name,
                     ids[r.professional_name],
-                    day.isoformat(),
+                    day,
                     fmt_time(r.start),
                     r.duration,
                     r.status,

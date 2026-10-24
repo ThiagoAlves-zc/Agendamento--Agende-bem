@@ -4,6 +4,7 @@ Execute com:  streamlit run app.py
 """
 from __future__ import annotations
 
+import base64
 from datetime import time as dtime
 from datetime import timedelta
 from html import escape
@@ -15,7 +16,7 @@ import streamlit as st
 import csv_handler
 import scheduler
 import services
-from database import connect
+from database import DatabaseError, connect
 from models import (
     ORIGIN_FIT_IN,
     STATUS_CANCELLED,
@@ -31,6 +32,8 @@ BASE_DIR = Path(__file__).resolve().parent
 SAMPLE_CSV = BASE_DIR / "samples" / "agenda_exemplo.csv"
 
 PAGES = ["Dashboard", "Agenda", "Lista de espera", "Sugestões", "Importar / Exportar"]
+PAGE_SLUGS = dict(zip(PAGES, ["dashboard", "agenda", "espera", "sugestoes", "dados"]))
+PAGE_SLUGS_REVERSE = {slug: page for page, slug in PAGE_SLUGS.items()}
 WEEKDAYS = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"]
 
 st.set_page_config(
@@ -493,10 +496,17 @@ def page_import_export(conn) -> None:
         )
         st.download_button("Baixar modelo CSV", SAMPLE_CSV.read_bytes(), file_name="agenda_exemplo.csv",
                            mime="text/csv", on_click="ignore")
-        uploaded = st.file_uploader("Arquivo CSV da agenda", type=["csv"],
-                                    key=f"uploader_{st.session_state.get('uploader_round', 0)}")
-        if uploaded is not None:
-            parsed = csv_handler.parse_agenda_csv(uploaded.getvalue())
+        upload_round = st.session_state.get("uploader_round", 0)
+        uploaded = st.file_uploader("Arquivo CSV da agenda", type=["csv"], key=f"uploader_{upload_round}")
+        # Alternativa ao upload HTTP: o texto segue pela conexão WebSocket já aberta, útil quando
+        # a hospedagem distribui requisições entre instâncias (ex.: containers na Vercel).
+        with st.expander("Alternativa: colar o conteúdo do CSV"):
+            pasted = st.text_area("Conteúdo do CSV", height=160, max_chars=csv_handler.MAX_BYTES,
+                                  key=f"pasted_{upload_round}",
+                                  placeholder="data;horario;duracao_min;profissional;especialidade;paciente;status")
+        raw = uploaded.getvalue() if uploaded is not None else (pasted.encode("utf-8") if pasted.strip() else None)
+        if raw is not None:
+            parsed = csv_handler.parse_agenda_csv(raw)
             if parsed.rows or parsed.day:
                 m1, m2, m3 = st.columns(3)
                 m1.metric("Dia", fmt_date_br(parsed.day) if parsed.day else "—")
@@ -538,11 +548,16 @@ def page_import_export(conn) -> None:
             ]),
             hide_index=True, width="stretch", height=360,
         )
+        export_bytes = csv_handler.export_agenda_csv(conn)
+        export_name = f"agenda_agende_bem_{day.isoformat()}.csv"
         st.download_button(
-            "Exportar agenda (CSV)", csv_handler.export_agenda_csv(conn),
-            file_name=f"agenda_agende_bem_{day.isoformat()}.csv", mime="text/csv",
+            "Exportar agenda (CSV)", export_bytes, file_name=export_name, mime="text/csv",
             type="primary", on_click=on_export,
         )
+        # Link embutido (data URI): não depende do armazenamento em memória de uma instância.
+        encoded = base64.b64encode(export_bytes).decode("ascii")
+        html(f'<a class="ab-alt-download" download="{escape(export_name)}" '
+             f'href="data:text/csv;charset=utf-8;base64,{encoded}">Link alternativo de download</a>')
         st.caption("O arquivo usa `;` como separador e UTF-8, compatível com Excel. Células que "
                    "começam com =, +, - ou @ são neutralizadas contra CSV Injection.")
 
@@ -551,10 +566,23 @@ def page_import_export(conn) -> None:
 
 def main() -> None:
     html(f"<style>{(BASE_DIR / 'styles.css').read_text(encoding='utf-8')}</style>")
-    st.session_state.setdefault("page", PAGES[0])
-    conn = db()
-    ensure_seeded(conn)
+    # A página fica na URL: se o WebSocket reconectar em outra instância, a tela é mantida.
+    if "page" not in st.session_state:
+        st.session_state.page = PAGE_SLUGS_REVERSE.get(st.query_params.get("pagina", ""), PAGES[0])
+    try:
+        conn = db()
+        ensure_seeded(conn)
+    except DatabaseError as exc:
+        st.error(f"Banco de dados indisponível: {exc}", icon=":material/error:")
+        st.stop()
+    except Exception as exc:  # falha de rede/pool: não expor detalhes de conexão na tela
+        print(f"[agende-bem] falha ao conectar ao banco: {type(exc).__name__}", flush=True)
+        st.error("Não foi possível conectar ao banco de dados. Tente novamente em instantes.",
+                 icon=":material/error:")
+        st.stop()
     page = sidebar(conn)
+    if st.query_params.get("pagina") != PAGE_SLUGS[page]:
+        st.query_params["pagina"] = PAGE_SLUGS[page]
     show_flash()
     {
         "Dashboard": page_dashboard,

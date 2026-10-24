@@ -1,7 +1,7 @@
 import pytest
 
 import services
-from database import connect
+import database
 from models import ValidationError, parse_time
 
 
@@ -100,9 +100,11 @@ def test_waiting_validations(conn):
     assert any(e.id == new_id for e in services.list_waiting(conn, "ativo"))
 
 
-def test_data_persists_across_connections(conn, db_file):
+def test_data_persists_across_connections(conn, open_db, backend):
     services.cancel_appointment(conn, find(conn, "Marcos Vieira").id)
     conn.close()
-    reopened = connect(db_file)
+    if backend == "postgres":
+        database.close_pools()  # simula reinício da instância: nenhum estado em memória
+    reopened = open_db()
     assert find(reopened, "Marcos Vieira").status == "cancelado"
     reopened.close()
