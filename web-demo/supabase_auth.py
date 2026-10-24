@@ -77,6 +77,10 @@ class SupabaseAuth:
     def current_user(self, session: AuthSession) -> dict:
         return self._request("GET", "/auth/v1/user", token=session.access_token)
 
+    def sign_out(self, session: AuthSession) -> None:
+        """Revoga a sessão no Auth antes de remover o estado local."""
+        self._request("POST", "/auth/v1/logout", token=session.access_token, payload={})
+
     def request_password_reset(self, email: str, redirect_to: str) -> None:
         # A resposta é intencionalmente uniforme para evitar enumeração de contas.
         self._request("POST", "/auth/v1/recover", payload={"email": email, "redirect_to": redirect_to})

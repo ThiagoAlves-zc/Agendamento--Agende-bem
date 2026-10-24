@@ -26,6 +26,7 @@ class Permission(StrEnum):
     ARCHIVE_FILES = "archive_files"
     MANAGE_TEMPLATES = "manage_templates"
     MANAGE_SETTINGS = "manage_settings"
+    MANAGE_USERS = "manage_users"
 
 
 _MATRIX: dict[Role, frozenset[Permission]] = {

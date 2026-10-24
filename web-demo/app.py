@@ -5,6 +5,7 @@ Execute com:  streamlit run app.py
 from __future__ import annotations
 
 import base64
+import os
 from datetime import time as dtime
 from datetime import timedelta
 from html import escape
@@ -16,7 +17,10 @@ import streamlit as st
 import csv_handler
 import scheduler
 import services
+from authorization import AccessDenied, Actor, Permission, Role, allowed, require
 from database import DatabaseError, connect
+from file_library import FileLibraryError, SupabaseStorage, archive_asset, download_asset, list_assets, upload_asset
+from identity_service import IdentityError, actor_for_verified_user, list_users, set_user_role
 from models import (
     ORIGIN_FIT_IN,
     STATUS_CANCELLED,
@@ -27,12 +31,14 @@ from models import (
     fmt_time,
 )
 from seed import ensure_seeded, reset_demo
+from supabase_auth import AuthError, AuthSession, SupabaseAuth
+from template_catalog import register_defaults
 
 BASE_DIR = Path(__file__).resolve().parent
 SAMPLE_CSV = BASE_DIR / "samples" / "agenda_exemplo.csv"
 
-PAGES = ["Dashboard", "Agenda", "Lista de espera", "Sugestões", "Aproveitamento", "Histórico", "Apresentação", "Importar / Exportar"]
-PAGE_SLUGS = dict(zip(PAGES, ["dashboard", "agenda", "espera", "sugestoes", "aproveitamento", "historico", "apresentacao", "dados"]))
+PAGES = ["Dashboard", "Agenda", "Lista de espera", "Sugestões", "Aproveitamento", "Histórico", "Arquivos", "Modelos", "Usuários e permissões", "Perfil", "Apresentação", "Importar / Exportar"]
+PAGE_SLUGS = dict(zip(PAGES, ["dashboard", "agenda", "espera", "sugestoes", "aproveitamento", "historico", "arquivos", "modelos", "usuarios", "perfil", "apresentacao", "dados"]))
 PAGE_SLUGS_REVERSE = {slug: page for page, slug in PAGE_SLUGS.items()}
 WEEKDAYS = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"]
 
@@ -66,6 +72,23 @@ def show_flash() -> None:
 def go(page: str) -> None:
     st.session_state.page = page
     st.query_params["pagina"] = PAGE_SLUGS[page]
+
+
+def current_actor() -> Actor:
+    """Ator da execução. O fallback só existe para o cenário fictício local."""
+    actor = st.session_state.get("actor")
+    if isinstance(actor, Actor):
+        return actor
+    return Actor("demo-local", "demo@agendebem.local", Role.ADMIN)
+
+
+def check_action(permission: Permission) -> bool:
+    try:
+        require(current_actor(), permission)
+        return True
+    except AccessDenied as exc:
+        flash("error", str(exc))
+        return False
 
 
 def html(markup: str) -> None:
@@ -105,6 +128,8 @@ def window_key(window: Window) -> tuple[int, int]:
 # -------------------------------------------------------------- callbacks
 
 def on_confirm_cancel(appointment_id: int, patient: str) -> None:
+    if not check_action(Permission.MANAGE_AGENDA):
+        return
     try:
         window = services.cancel_appointment(db(), appointment_id)
     except ValidationError as exc:
@@ -123,6 +148,8 @@ def on_open_suggestions(key: tuple[int, int]) -> None:
 
 
 def on_confirm_fit_in(waiting_id: int, professional_id: int, start: int, patient: str) -> None:
+    if not check_action(Permission.CONFIRM_FIT_IN):
+        return
     try:
         services.confirm_fit_in(db(), waiting_id, professional_id, start)
     except ValidationError as exc:
@@ -142,6 +169,9 @@ def on_confirm_fit_in(waiting_id: int, professional_id: int, start: int, patient
 
 
 def on_reset_demo() -> None:
+    if os.environ.get("AGENDE_BEM_DEMO_MODE", "true").lower() != "true" or not check_action(Permission.MANAGE_SETTINGS):
+        flash("error", "A restauração é exclusiva do modo de demonstração.")
+        return
     reset_demo(db())
     for key in ("pending_cancel", "selected_candidate", "focus_window", "confirm_reset"):
         st.session_state.pop(key, None)
@@ -211,9 +241,14 @@ def sidebar(conn) -> str:
             ("sugestoes", "Central de encaixes", ":material/event_available:"),
             ("aproveitamento", "Aproveitamento", ":material/insights:"),
             ("historico", "Histórico", ":material/history:"),
+            ("arquivos", "Arquivos", ":material/folder_open:"),
+            ("modelos", "Biblioteca de modelos", ":material/article:"),
             ("apresentacao", "Modo de apresentação", ":material/slideshow:"),
             ("dados", "Importar / Exportar", ":material/import_export:"),
         ]
+        if allowed(current_actor(), Permission.MANAGE_USERS):
+            navigation.insert(8, ("usuarios", "Usuários e permissões", ":material/manage_accounts:"))
+        navigation.append(("perfil", "Perfil", ":material/account_circle:"))
         for slug, label, icon in navigation:
             target = PAGE_SLUGS_REVERSE[slug]
             st.button(f"{icon}  {label}", key=f"nav_{slug}", width="stretch",
@@ -221,15 +256,18 @@ def sidebar(conn) -> str:
         day = services.get_agenda_day(conn)
         html('<div class="ab-side-label">Dia de atendimento</div>'
              f'<div class="ab-side-date">{escape(day_label(day))}</div>')
-        html('<div class="ab-side-label">Demonstração</div>')
-        with st.expander("Restaurar dados de demonstração"):
-            st.caption("Recarrega o cenário fictício e descarta as alterações deste banco. "
-                       "Arquivos externos não são afetados.")
-            confirmed = st.checkbox("Confirmo a restauração", key="confirm_reset")
-            st.button("Restaurar agora", on_click=on_reset_demo, disabled=not confirmed,
-                      width="stretch")
-        html('<div class="ab-side-foot">Ambiente de demonstração.<br>'
-             'Todos os dados são fictícios.</div>')
+        if os.environ.get("AGENDE_BEM_DEMO_MODE", "true").lower() == "true":
+            html('<div class="ab-side-label">Demonstração</div>')
+            with st.expander("Restaurar dados de demonstração"):
+                st.caption("Recarrega o cenário fictício e descarta as alterações deste banco. "
+                           "Arquivos externos não são afetados.")
+                confirmed = st.checkbox("Confirmo a restauração", key="confirm_reset")
+                st.button("Restaurar agora", on_click=on_reset_demo, disabled=not confirmed,
+                          width="stretch")
+            html('<div class="ab-side-foot">Ambiente de demonstração.<br>'
+                 'Todos os dados são fictícios.</div>')
+        else:
+            html('<div class="ab-side-foot">Ambiente operacional.<br>Dados persistidos com segurança.</div>')
     return page
 
 
@@ -788,6 +826,183 @@ def page_import_export(conn) -> None:
                    "começam com =, +, - ou @ são neutralizadas contra CSV Injection.")
 
 
+# -------------------------------------------------- identidade e biblioteca
+
+def authenticate(conn) -> bool:
+    """Barreira opcional para ativação futura; nada é colocado na URL."""
+    demo_mode = os.environ.get("AGENDE_BEM_DEMO_MODE", "true").lower() == "true"
+    # Em operação, autenticação é segura por padrão. O bypass só é permitido
+    # no cenário fictício local, nunca por um parâmetro vindo do cliente.
+    default_required = "false" if demo_mode else "true"
+    if os.environ.get("AGENDE_BEM_AUTH_REQUIRED", default_required).lower() != "true":
+        return True
+    auth = SupabaseAuth()
+    session = st.session_state.get("auth_session")
+    try:
+        if isinstance(session, AuthSession):
+            if session.expires_soon:
+                session = auth.refresh(session)
+                st.session_state.auth_session = session
+            verified = auth.current_user(session)
+            st.session_state.actor = actor_for_verified_user(conn, str(verified["id"]), str(verified["email"]))
+            return True
+    except (AuthError, AccessDenied, KeyError):
+        st.session_state.pop("auth_session", None)
+        st.session_state.pop("actor", None)
+    st.markdown("## Acesso ao Agende Bem")
+    st.caption("Use uma conta autorizada. O papel operacional é validado no servidor.")
+    if not auth.configured:
+        st.error("Autenticação ainda não configurada neste ambiente.")
+        return False
+    with st.form("login"):
+        email = st.text_input("E-mail", autocomplete="email")
+        password = st.text_input("Senha", type="password", autocomplete="current-password")
+        submitted = st.form_submit_button("Entrar", type="primary", width="stretch")
+    if submitted:
+        try:
+            session = auth.sign_in(email, password)
+            verified = auth.current_user(session)
+            st.session_state.actor = actor_for_verified_user(conn, str(verified["id"]), str(verified["email"]))
+            st.session_state.auth_session = session
+            st.rerun()
+        except (AuthError, AccessDenied, KeyError):
+            st.error("Não foi possível iniciar uma sessão com acesso operacional.")
+    with st.expander("Recuperar acesso"):
+        reset_email = st.text_input("E-mail para recuperação", key="reset_email", autocomplete="email")
+        if st.button("Enviar instruções", key="reset_submit"):
+            redirect_to = os.environ.get("AGENDE_BEM_AUTH_REDIRECT_URL")
+            if not redirect_to:
+                st.error("A recuperação ainda não foi configurada pelo administrador.")
+            else:
+                try:
+                    auth.request_password_reset(reset_email, redirect_to)
+                except AuthError:
+                    pass
+                st.success("Se existir uma conta elegível, as instruções foram enviadas.")
+    return False
+
+
+def page_profile(conn) -> None:
+    actor = current_actor()
+    page_head("Conta", "Perfil e sessão", "Identidade e permissões resolvidas no servidor.")
+    st.write(f"**{actor.email}**")
+    st.caption(f"Perfil operacional: {actor.role.value.capitalize()}")
+    if st.button("Sair", type="secondary"):
+        session = st.session_state.get("auth_session")
+        if isinstance(session, AuthSession):
+            try:
+                SupabaseAuth().sign_out(session)
+            except AuthError:
+                pass
+        st.session_state.pop("auth_session", None)
+        st.session_state.pop("actor", None)
+        st.rerun()
+
+
+def page_users(conn) -> None:
+    page_head("Administração", "Usuários e permissões", "Somente administradores podem alterar papéis operacionais.")
+    actor = current_actor()
+    try:
+        users = list_users(conn, actor)
+    except AccessDenied:
+        st.error("Acesso negado: esta tela é exclusiva de administradores.")
+        return
+    if not users:
+        st.info("Nenhum usuário operacional. O primeiro administrador deve ser criado pelo procedimento seguro documentado.")
+        return
+    for user in users:
+        with st.container(border=True):
+            left, middle, right = st.columns([2, 1, 1])
+            left.write(user.email)
+            role = middle.selectbox("Perfil", list(Role), format_func=lambda value: value.value.capitalize(),
+                                  index=list(Role).index(user.role), key=f"role_{user.user_id}", label_visibility="collapsed")
+            if right.button("Salvar", key=f"user_{user.user_id}"):
+                try:
+                    set_user_role(conn, actor, user.user_id, role)
+                    flash("success", "Permissão atualizada.")
+                    st.rerun()
+                except (AccessDenied, IdentityError) as exc:
+                    st.error(str(exc))
+
+
+def page_files(conn) -> None:
+    page_head("Biblioteca", "Arquivos operacionais", "CSV e PDF sem dados pessoais; conteúdo privado no Storage.")
+    actor, storage = current_actor(), SupabaseStorage()
+    if allowed(actor, Permission.UPLOAD_FILES):
+        with st.expander("Enviar arquivo operacional"):
+            uploaded = st.file_uploader("Arquivo CSV ou PDF", type=["csv", "pdf"], key="file_upload")
+            category = st.selectbox("Categoria", ["operacional"], label_visibility="collapsed")
+            if uploaded and st.button("Enviar arquivo", type="primary", key="upload_file"):
+                try:
+                    upload_asset(conn, storage, actor, uploaded.name, uploaded.getvalue(), uploaded.type, category)
+                    flash("success", "Arquivo enviado e validado.")
+                    st.rerun()
+                except (FileLibraryError, AccessDenied) as exc:
+                    st.error(str(exc))
+    try:
+        assets = list_assets(conn, actor, search=st.text_input("Pesquisar arquivos"))
+    except AccessDenied as exc:
+        st.error(str(exc)); return
+    if not assets:
+        st.info("Nenhum arquivo operacional disponível.")
+    for asset in assets:
+        with st.container(border=True):
+            st.write(f"**{asset.display_name}** · {asset.category} · {asset.byte_size / 1024:.1f} KB")
+            a, b = st.columns(2)
+            if a.button("Baixar", key=f"download_asset_{asset.id}"):
+                try:
+                    _, content = download_asset(conn, storage, actor, asset.id)
+                    st.download_button("Salvar arquivo", content, file_name=asset.original_name, mime=asset.mime_type,
+                                       key=f"save_asset_{asset.id}")
+                except (FileLibraryError, AccessDenied) as exc:
+                    st.error(str(exc))
+            if allowed(actor, Permission.ARCHIVE_FILES) and b.button("Arquivar", key=f"archive_asset_{asset.id}"):
+                archive_file_dialog(conn, asset.id, asset.display_name)
+
+
+@st.dialog("Arquivar arquivo")
+def archive_file_dialog(conn, asset_id: int, display_name: str) -> None:
+    """A abertura e o fechamento do diálogo não alteram o arquivo."""
+    st.write(f"Arquivar **{display_name}**?")
+    st.caption("O arquivo deixará de estar disponível para download. O objeto não será excluído automaticamente.")
+    back, confirm = st.columns(2)
+    back.button("Voltar", width="stretch")
+    if confirm.button("Arquivar arquivo", type="primary", width="stretch"):
+        try:
+            archive_asset(conn, current_actor(), asset_id)
+            flash("success", "Arquivo arquivado. O conteúdo não foi apagado automaticamente.")
+            st.rerun()
+        except (FileLibraryError, AccessDenied) as exc:
+            st.error(str(exc))
+
+
+def page_templates(conn) -> None:
+    page_head("Biblioteca", "Modelos reutilizáveis", "Arquivos reais, versionados e disponíveis para download.")
+    actor, storage = current_actor(), SupabaseStorage()
+    if allowed(actor, Permission.MANAGE_TEMPLATES):
+        if st.button("Registrar cinco modelos padrão", type="primary"):
+            try:
+                created = register_defaults(conn, storage, actor)
+                flash("success", f"{created} modelo(s) registrado(s).")
+                st.rerun()
+            except (FileLibraryError, AccessDenied) as exc:
+                st.error(str(exc))
+    rows = conn.execute("SELECT t.id, t.title, t.description, t.template_type, t.current_version, t.current_asset_id FROM file_templates t WHERE t.status = 'ativo' ORDER BY t.title").fetchall()
+    if not rows:
+        st.info("Nenhum modelo registrado. O administrador pode registrar o catálogo padrão quando o Storage privado estiver configurado.")
+    for row in rows:
+        with st.container(border=True):
+            st.write(f"**{row['title']}** · versão {row['current_version']}")
+            st.caption(row["description"])
+            if st.button("Baixar modelo", key=f"download_template_{row['id']}"):
+                try:
+                    asset, content = download_asset(conn, storage, actor, row["current_asset_id"])
+                    st.download_button("Salvar modelo", content, file_name=asset.original_name, mime=asset.mime_type,
+                                       key=f"save_template_{row['id']}")
+                except (FileLibraryError, AccessDenied) as exc:
+                    st.error(str(exc))
+
+
 # -------------------------------------------------------------------- main
 
 def main() -> None:
@@ -797,7 +1012,8 @@ def main() -> None:
         st.session_state.page = PAGE_SLUGS_REVERSE.get(st.query_params.get("pagina", ""), PAGES[0])
     try:
         conn = db()
-        ensure_seeded(conn)
+        if os.environ.get("AGENDE_BEM_DEMO_MODE", "true").lower() == "true":
+            ensure_seeded(conn)
     except DatabaseError as exc:
         st.error(f"Banco de dados indisponível: {exc}", icon=":material/error:")
         st.stop()
@@ -806,6 +1022,8 @@ def main() -> None:
         st.error("Não foi possível conectar ao banco de dados. Tente novamente em instantes.",
                  icon=":material/error:")
         st.stop()
+    if not authenticate(conn):
+        return
     page = sidebar(conn)
     if st.query_params.get("pagina") != PAGE_SLUGS[page]:
         st.query_params["pagina"] = PAGE_SLUGS[page]
@@ -817,6 +1035,10 @@ def main() -> None:
         "Sugestões": page_suggestions,
         "Aproveitamento": page_utilization,
         "Histórico": page_history,
+        "Arquivos": page_files,
+        "Modelos": page_templates,
+        "Usuários e permissões": page_users,
+        "Perfil": page_profile,
         "Apresentação": page_presentation,
         "Importar / Exportar": page_import_export,
     }[page](conn)

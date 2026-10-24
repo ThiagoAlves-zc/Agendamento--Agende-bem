@@ -24,13 +24,16 @@ def test_login_refresh_and_server_validation_do_not_log_tokens():
         Response(200, {"access_token": "next", "refresh_token": "next-refresh", "expires_in": 3600,
                        "user": {"id": "u1", "email": "admin@example.test"}}),
         Response(200, {"id": "u1", "email": "admin@example.test"}),
+        Response(200, {}),
     ])
     auth = SupabaseAuth("https://project.supabase.co", "publishable", http)
     session = auth.sign_in("admin@example.test", "not-in-url")
     renewed = auth.refresh(session)
     assert auth.current_user(renewed)["id"] == "u1"
+    auth.sign_out(renewed)
     assert all("not-in-url" not in url for _, url, _ in http.calls)
     assert http.calls[2][2]["headers"]["Authorization"] == "Bearer next"
+    assert http.calls[3][1].endswith("/auth/v1/logout")
 
 
 def test_invalid_credentials_and_missing_configuration_are_safe():
