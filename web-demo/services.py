@@ -4,7 +4,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Iterable, Mapping
-from zoneinfo import ZoneInfo
 
 import scheduler
 from database import Database, IntegrityError, transaction
@@ -20,6 +19,7 @@ from models import (
     ValidationError,
     WAIT_ACTIVE,
     WAIT_REMOVED,
+    LOCAL_TZ,
     WAIT_SCHEDULED,
     WaitingEntry,
     Window,
@@ -28,11 +28,11 @@ from models import (
     parse_time,
     validate_duration,
     validate_interval,
+    today_local,
     validate_name,
 )
 
 MAX_NOTES = 200
-LOCAL_TZ = ZoneInfo("America/Sao_Paulo")
 
 
 # ------------------------------------------------------------------ helpers
@@ -128,7 +128,7 @@ def find_overlaps(appointments: Iterable[Appointment]) -> list[str]:
 
 def get_agenda_day(conn: Database) -> date:
     row = conn.execute("SELECT value FROM settings WHERE key = 'agenda_day'").fetchone()
-    return parse_date(row["value"]) if row else date.today()
+    return parse_date(row["value"]) if row else today_local()
 
 
 def set_agenda_day(conn: Database, day: date) -> None:

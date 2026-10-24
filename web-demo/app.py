@@ -173,7 +173,7 @@ def sidebar(conn) -> str:
              f'<div class="ab-side-date">{escape(day_label(day))}</div>')
         html('<div class="ab-side-label">Demonstração</div>')
         with st.expander("Restaurar dados de demonstração"):
-            st.caption("Recarrega o cenário fictício e descarta as alterações deste banco local. "
+            st.caption("Recarrega o cenário fictício e descarta as alterações deste banco. "
                        "Arquivos externos não são afetados.")
             confirmed = st.checkbox("Confirmo a restauração", key="confirm_reset")
             st.button("Restaurar agora", on_click=on_reset_demo, disabled=not confirmed,

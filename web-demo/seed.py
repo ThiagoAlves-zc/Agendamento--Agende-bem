@@ -1,6 +1,6 @@
 """Dados sintéticos de demonstração (nenhum dado real de paciente).
 
-Uso: ``python seed.py`` restaura o cenário de demonstração no banco local.
+Uso: ``python seed.py`` restaura o cenário de demonstração no banco configurado.
 
 Cenário: a consulta de 30 min de Marcos Vieira com a Dra. Helena Prado às
 09:30 é a candidata a cancelamento. Na lista de espera há candidatos
@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from database import Database, connect, init_db, transaction
+from models import today_local
 from services import _insert, log_event, set_agenda_day
 
 PROFESSIONALS = [
@@ -80,7 +81,7 @@ def reset_demo(conn: Database, day: date | None = None, only_if_empty: bool = Fa
     ``only_if_empty`` verifica o banco já dentro da transação (com o bloqueio de
     escrita), evitando carga duplicada quando duas instâncias iniciam juntas.
     """
-    day = day or date.today()
+    day = day or today_local()
     init_db(conn)
     with transaction(conn):
         if only_if_empty and not _is_empty(conn):
