@@ -161,6 +161,25 @@ html, body, .stApp, .stMarkdown, p, label, input, textarea, button, h1, h2, h3, 
 .ab-slot.free { border-style: dashed; background: transparent; }
 .ab-slot.free .ab-slot-name { color: var(--ab-cyan); }
 
+/* Agenda V2 — linha do tempo proporcional */
+.ab-timeline-scroll { overflow-x: auto; padding: .25rem 0 .8rem; }
+.ab-timeline { --ab-track-height: 560px; min-width: 720px; display: grid; grid-template-columns: 64px repeat(var(--ab-timeline-columns), minmax(190px, 1fr)); gap: 10px; }
+.ab-timeline-axis, .ab-timeline-track { height: var(--ab-track-height); position: relative; }
+.ab-timeline-axis { margin-top: 48px; color: var(--ab-muted); font-size: .72rem; }
+.ab-time-tick { position: absolute; right: 8px; transform: translateY(-50%); font-variant-numeric: tabular-nums; }
+.ab-timeline-prof { min-width: 0; }
+.ab-timeline-prof header { min-height: 48px; background: var(--ab-navy); border-radius: 10px 10px 0 0; color: #fff; padding: .62rem .75rem; }
+.ab-timeline-prof header b, .ab-timeline-prof header span { display: block; }
+.ab-timeline-prof header span { color: #A9C3DD; font-size: .72rem; margin-top: .12rem; }
+.ab-timeline-track { border: 1px solid var(--ab-border); border-top: 0; border-radius: 0 0 10px 10px; background: repeating-linear-gradient(to bottom, transparent 0, transparent calc(12.5% - 1px), #EAF0F6 calc(12.5% - 1px), #EAF0F6 12.5%); overflow: hidden; }
+.ab-timeline-block { position: absolute; left: 7px; right: 7px; min-height: 20px; padding: .28rem .38rem; border-radius: 6px; overflow: hidden; border-left: 3px solid; font-size: .68rem; line-height: 1.15; }
+.ab-timeline-block span, .ab-timeline-block b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ab-timeline-block span { opacity: .8; font-variant-numeric: tabular-nums; }
+.ab-timeline-block.confirmed { background: #EAF6EF; border-color: var(--ab-success); color: #11613F; }
+.ab-timeline-block.cancelled { background: var(--ab-danger-soft); border-color: var(--ab-danger); color: #96373E; text-decoration: line-through; }
+.ab-timeline-block.fitin { background: var(--ab-cyan-soft); border-color: var(--ab-cyan); color: #006E7B; }
+.ab-timeline-block.free { background: #F8FBFD; border: 1px dashed var(--ab-action); color: var(--ab-action); }
+
 /* Selos de status */
 .ab-badge {
   display: inline-block; padding: .14rem .55rem; border-radius: 99px; font-size: .72rem;
@@ -214,6 +233,8 @@ html, body, .stApp, .stMarkdown, p, label, input, textarea, button, h1, h2, h3, 
   .ab-demo-steps { grid-template-columns: 1fr; }
   .ab-next { grid-template-columns: 52px 1fr; }
   .ab-next small { grid-column: 2; }
+  .ab-timeline { min-width: 330px; grid-template-columns: 48px repeat(var(--ab-timeline-columns), minmax(250px, 1fr)); }
+  .ab-timeline-axis { font-size: .66rem; }
 }
 .ab-alt-download { display: inline-block; margin-top: .6rem; font-size: .85rem; color: var(--ab-navy-2); }
 

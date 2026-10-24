@@ -350,6 +350,49 @@ def timeline_html(prof, appts, windows) -> str:
     )
 
 
+def vertical_timeline_html(profs, appts, day) -> str:
+    """Timeline proporcional de leitura; ações continuam nos controles nativos abaixo."""
+    if not profs:
+        return '<div class="ab-empty">Nenhum profissional ativo para este dia.</div>'
+    start = min(p.day_start for p in profs)
+    end = max(p.day_end for p in profs)
+    total = max(end - start, 1)
+    ticks = range(start, end + 1, 30)
+    axis = ''.join(
+        f'<span class="ab-time-tick" style="top:{(moment - start) / total * 100:.2f}%">{fmt_time(moment)}</span>'
+        for moment in ticks
+    )
+    columns = []
+    for prof in profs:
+        own = [a for a in appts if a.professional_id == prof.id]
+        windows = scheduler.free_windows(prof, day, appts, min_length=5)
+        blocks = []
+        for window in windows:
+            top = (window.start - start) / total * 100
+            height = window.length / total * 100
+            blocks.append(
+                f'<div class="ab-timeline-block free" style="top:{top:.2f}%;height:{height:.2f}%">'
+                f'<span>{fmt_time(window.start)}–{fmt_time(window.end)}</span><b>Disponível</b></div>'
+            )
+        for appt in own:
+            top = (appt.start - start) / total * 100
+            height = appt.duration / total * 100
+            state = 'cancelled' if appt.status == STATUS_CANCELLED else ('fitin' if appt.origin == ORIGIN_FIT_IN else 'confirmed')
+            blocks.append(
+                f'<div class="ab-timeline-block {state}" style="top:{top:.2f}%;height:{height:.2f}%">'
+                f'<span>{fmt_time(appt.start)}–{fmt_time(appt.end)}</span><b>{escape(appt.patient_name)}</b></div>'
+            )
+        columns.append(
+            f'<section class="ab-timeline-prof"><header><b>{escape(prof.name)}</b><span>{escape(prof.specialty)}</span></header>'
+            f'<div class="ab-timeline-track">{blocks}</div></section>'
+        )
+    return (
+        '<div class="ab-timeline-scroll"><div class="ab-timeline" '
+        f'style="--ab-timeline-columns:{len(profs)}"><div class="ab-timeline-axis">{axis}</div>'
+        + ''.join(columns) + '</div></div>'
+    )
+
+
 def page_agenda(conn) -> None:
     day = services.get_agenda_day(conn)
     profs = services.list_professionals(conn)
@@ -374,6 +417,17 @@ def page_agenda(conn) -> None:
             c2.button("Ir para exportação", key="success_export", on_click=go,
                       args=("Importar / Exportar",), width="stretch")
 
+    timeline_choice = st.selectbox(
+        "Profissionais na linha do tempo",
+        [0] + [p.id for p in profs],
+        format_func=lambda value: "Todos os profissionais" if value == 0 else next(p.name for p in profs if p.id == value),
+        key="timeline_professional",
+        help="Em telas pequenas, selecione um profissional para uma leitura confortável.",
+    )
+    timeline_profs = profs if timeline_choice == 0 else [p for p in profs if p.id == timeline_choice]
+    html(vertical_timeline_html(timeline_profs, appts, day))
+    st.caption("Confirmado · Cancelado · Disponível. A altura de cada bloco é proporcional à duração real.")
+
     hint = st.session_state.pop("agenda_tab_hint", None)
     if hint:
         name = next((p.name for p in profs if p.id == hint), "")
@@ -381,6 +435,7 @@ def page_agenda(conn) -> None:
 
     tabs = st.tabs(["Visão geral"] + [p.name for p in profs])
     with tabs[0]:
+        st.markdown("**Lista resumida por profissional**")
         cols = st.columns(len(profs) or 1)
         for col, prof in zip(cols, profs):
             own = [a for a in appts if a.professional_id == prof.id]
@@ -417,6 +472,8 @@ def page_agenda(conn) -> None:
         with st.container(border=True):
             st.markdown(f"**{detail.patient_name}** · {fmt_time(detail.start)}–{fmt_time(detail.end)}")
             st.caption(f"{detail.duration} min · {'Encaixe confirmado' if detail.origin == ORIGIN_FIT_IN else 'Atendimento confirmado'}")
+            st.button("Ver oportunidades de encaixe", key="agenda_fit_opportunities", on_click=go,
+                      args=("Sugestões",), width="stretch")
 
 
 # --------------------------------------------------------- lista de espera
